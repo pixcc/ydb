@@ -1594,6 +1594,12 @@ message THiveConfig {
     optional uint64 MaxPingsInFlight = 78 [default = 1000];
     optional string CutHistoryDenyList = 76 [default = "ColumnShard,KeyValue,PersQueue,BlobDepot"];
     optional string CutHistoryAllowList = 79 [default = "DataShard"];
+    optional double MinPeriodBetweenRecommendation = 80 [default = 5]; // seconds
+    optional uint64 ScaleOutWindowSize = 81 [default = 5]; // buckets
+    optional uint64 ScaleInWindowSize = 82 [default = 15]; // buckets
+    optional uint64 NodeMetricsWindowSize = 83 [default = 900000]; // milliseconds
+    optional double TargetCpuUtilization = 84 [default = 0.8]; // percent
+    optional double RecommenderThresholdMargin = 85 [default = 0.2]; // percent
 }
 
 message TBlobCacheConfig {

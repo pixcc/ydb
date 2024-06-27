@@ -34,6 +34,7 @@ struct TEvPrivate {
         EvDeleteNode,
         EvCanMoveTablets,
         EvUpdateDataCenterFollowers,
+        EvProcessRecommender,
         EvEnd
     };
 
@@ -127,6 +128,7 @@ struct TEvPrivate {
 
         TEvUpdateDataCenterFollowers(TDataCenterId dataCenter) : DataCenter(dataCenter) {};
     };
+    struct TEvProcessRecommender : TEventLocal<TEvProcessRecommender, EvProcessRecommender> {};
 };
 
 } // NHive

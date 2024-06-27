@@ -316,7 +316,9 @@ public:
                 node.ServicedDomains = nodeRowset.GetValueOrDefault<Schema::Node::ServicedDomains>();
                 node.Statistics = nodeRowset.GetValueOrDefault<Schema::Node::Statistics>();
                 node.Name = nodeRowset.GetValueOrDefault<Schema::Node::Name>();
-                node.MaximumCPU.InitializeFrom(nodeRowset.GetValueOrDefault<Schema::Node::MaximumCPU>());
+                TDuration NodeMetricsWindowSize = TDuration::MilliSeconds(Self->CurrentConfig.GetNodeMetricsWindowSize());
+                node.MaximumCPUUsage.SetWindowSize(NodeMetricsWindowSize, NodeMetricsWindowSize / TDuration::Minutes(1));
+                node.MaximumCPUUsage.InitializeFrom(nodeRowset.GetValueOrDefault<Schema::Node::MaximumCPUUsage>());
                 node.BecomeUpOnRestart = nodeRowset.GetValueOrDefault<Schema::Node::BecomeUpOnRestart>(false);
                 if (node.BecomeUpOnRestart) {
                     // If a node must become up on restart, it must have been down
@@ -852,6 +854,8 @@ public:
         Self->UpdateCounterTabletChannelHistorySize();
         Self->MigrationState = NKikimrHive::EMigrationState::MIGRATION_READY;
         ctx.Send(Self->SelfId(), new TEvPrivate::TEvBootTablets());
+        // TODO(pixcc): maybe start without timeout here + make timeout bigger
+        Self->ProcessRecommender();
 
         for (auto it = Self->Nodes.begin(); it != Self->Nodes.end(); ++it) {
             Self->ScheduleUnlockTabletExecution(it->second);

@@ -2274,6 +2274,13 @@ void THive::ProcessStorageBalancer() {
     }
 }
 
+void THive::ProcessRecommender() {
+    if (!ProcessRecommenderScheduled) {
+        Schedule(GetMinPeriodBetweenRecommendation(), new TEvPrivate::TEvProcessRecommender());
+        ProcessRecommenderScheduled = true;
+    }
+}
+
 THive::THiveStats THive::GetStats() const {
     THiveStats stats = {};
     stats.Values.reserve(Nodes.size());
@@ -2512,6 +2519,7 @@ void THive::UpdateTotalResourceValues(
             ProcessBootQueue();
         }
         ProcessTabletBalancer();
+        ProcessRecommender();
         LastResourceChangeReaction = now;
     }
 
@@ -3060,6 +3068,7 @@ void THive::ProcessEvent(std::unique_ptr<IEventHandle> event) {
         hFunc(TEvHive::TEvRequestTabletDistribution, Handle);
         hFunc(TEvPrivate::TEvUpdateDataCenterFollowers, Handle);
         hFunc(TEvHive::TEvRequestScaleRecommendation, Handle);
+        hFunc(TEvPrivate::TEvProcessRecommender, Handle)
     }
 }
 
@@ -3164,6 +3173,7 @@ STFUNC(THive::StateWork) {
         fFunc(TEvHive::TEvRequestTabletDistribution::EventType, EnqueueIncomingEvent);
         fFunc(TEvPrivate::TEvUpdateDataCenterFollowers::EventType, EnqueueIncomingEvent);
         fFunc(TEvHive::TEvRequestScaleRecommendation::EventType, EnqueueIncomingEvent);
+        fFunc(TEvPrivate::TEvProcessRecommender::EventType, EnqueueIncomingEvent);
         hFunc(TEvPrivate::TEvProcessIncomingEvent, Handle);
     default:
         if (!HandleDefaultEvents(ev, SelfId())) {
@@ -3468,6 +3478,16 @@ void THive::Handle(TEvPrivate::TEvUpdateDataCenterFollowers::TPtr& ev) {
 void THive::Handle(TEvHive::TEvRequestScaleRecommendation::TPtr& ev) {
     auto response = std::make_unique<TEvHive::TEvResponseScaleRecommendation>();
     Send(ev->Sender, response.release());
+}
+
+void THive::Handle(TEvPrivate::TEvProcessRecommender::TPtr&) {
+    ProcessRecommenderScheduled = false;
+    StartHiveRecommender({
+        .TargetCpuUtilization = CurrentConfig.GetTargetCpuUtilization(),
+        .ThresholdMargin = CurrentConfig.GetRecommenderThresholdMargin(),
+        .ScaleOutWindowSize = CurrentConfig.GetScaleOutWindowSize(),
+        .ScaleInWindowSize = CurrentConfig.GetScaleInWindowSize()
+    });
 }
 
 TVector<TNodeId> THive::GetNodesForWhiteboardBroadcast(size_t maxNodesToReturn) {

@@ -31,6 +31,7 @@ enum ESimpleCounters {
     COUNTER_STORAGE_SCATTER = 21 [(CounterOpts) = {Name: "StorageScatter"}];
     COUNTER_TABLETS_STARTING = 22 [(CounterOpts) = {Name: "TabletsStarting"}];
     COUNTER_PINGQUEUE_SIZE = 23 [(CounterOpts) = {Name: "PingQueueSize"}];
+    COUNTER_RECOMMENDED_CPU = 24 [(CounterOpts) = {Name: "RecommendedCPU"}];
 }
 
 enum ECumulativeCounters {
@@ -50,6 +51,10 @@ enum ECumulativeCounters {
     COUNTER_TABLETS_STORAGE_REASSIGNED = 13 [(CounterOpts) = {Name: "TabletsStorageReassigned"}];
     COUNTER_HISTORY_CUT = 14 [(CounterOpts) = {Name: "TabletHistoryCut"}];
     COUNTER_HISTORY_RESTORED = 15 [(CounterOpts) = {Name: "TabletHistoryRestored"}];
+    COUNTER_RECOMMENDER_EXECUTED = 16 [(CounterOpts) = {Name: "RecommenderExecuted"}];
+    COUNTER_RECOMMENDED_SCALE_OUT = 17 [(CounterOpts) = {Name: "RecommendedScaleOut"}];
+    COUNTER_RECOMMENDED_SCALE_IN = 18 [(CounterOpts) = {Name: "RecommendedScaleIn"}];
+    COUNTER_RECOMMENDED_SCALE_NOTHING = 19 [(CounterOpts) = {Name: "RecommendedScaleNothing"}];
 }
 
 enum EPercentileCounters {

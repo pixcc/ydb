@@ -30,6 +30,7 @@ SRCS(
     node_info.cpp
     node_info.h
     object_distribution.h
+    recommender.cpp
     sequencer.cpp
     sequencer.h
     follower_group.h
