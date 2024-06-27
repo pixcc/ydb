@@ -355,9 +355,9 @@ public:
         out << "<script>$('.container').css('width', 'auto');</script>";
         out << "<table class='table table-sortable'>";
         out << "<thead>";
-        out << "<tr><th>NodeId</th><th>Local</th><th>Domains</th><th>TabletsScheduled</th><th>TabletsRunning</th>"
+        out << "<tr><th>NodeId</th><th>Local</th><th>MaximumCPUUsage</th><th>Domains</th><th>TabletsScheduled</th><th>TabletsRunning</th>"
                "<th>Values</th><th>Total</th><th>Total</th><th>Maximum</th><th>VolatileState</th><th>Location</th>"
-               "<th>LastAlive</th><th>Restarts</th><th>MaximumCPU</th>"
+               "<th>LastAlive</th><th>Restarts</th>"
             << "</tr>";
         out << "</thead>";
         out << "<tbody>";
@@ -371,6 +371,9 @@ public:
             out << "<tr>";
             out << "<td>" << nodeId << "</td>";
             out << "<td>" << x.Local << "</td>";
+            // TODO(pixcc): make it looks more clean in UI
+            // maybe just last bucket
+            out << "<td>" << x.MaximumCPUUsage.ShortDebugString() << "</td>";
             out << "<td>" << x.ServicedDomains << "</td>";
             out << "<td>" << x.GetTabletsScheduled() << "</td>";
             out << "<td>" << x.GetTabletsTotal() - x.GetTabletsScheduled() << "</td>";
@@ -382,7 +385,6 @@ public:
             out << "<td>" << GetLocationString(x.Location) << "</td>";
             out << "<td>" << TInstant::MilliSeconds(x.Statistics.GetLastAliveTimestamp()).ToStringUpToSeconds() << "</td>";
             out << "<td>" << x.Statistics.RestartTimestampSize() << "</td>";
-            out << "<td>" << x.MaximumCPU.ShortDebugString() << "</td>";
             out << "</tr>";
         }
         out << "</tbody>";
@@ -839,6 +841,12 @@ public:
         UpdateConfig(db, "MinGroupUsageToBalance", configUpdates);
         UpdateConfig(db, "StorageBalancerInflight", configUpdates);
         UpdateConfig(db, "LessSystemTabletsMoves", configUpdates);
+        UpdateConfig(db, "MinPeriodBetweenRecommendation", configUpdates);
+        UpdateConfig(db, "ScaleOutWindowSize", configUpdates);
+        UpdateConfig(db, "ScaleInWindowSize", configUpdates);
+        UpdateConfig(db, "NodeMetricsWindowSize", configUpdates);
+        UpdateConfig(db, "TargetCpuUtilization", configUpdates);
+        UpdateConfig(db, "RecommenderThresholdMargin", configUpdates);
 
         if (params.contains("BalancerIgnoreTabletTypes")) {
             auto value = params.Get("BalancerIgnoreTabletTypes");
@@ -1187,6 +1195,12 @@ public:
         ShowConfig(out, "StorageBalancerInflight");
         ShowConfig(out, "LessSystemTabletsMoves");
         ShowConfigForBalancerIgnoreTabletTypes(out);
+        ShowConfig(out, "MinPeriodBetweenRecommendation");
+        ShowConfig(out, "ScaleOutWindowSize");
+        ShowConfig(out, "ScaleInWindowSize");
+        ShowConfig(out, "NodeMetricsWindowSize");
+        ShowConfig(out, "TargetCpuUtilization");
+        ShowConfig(out, "RecommenderThresholdMargin");
 
         out << "<div class='row' style='margin-top:40px'>";
         out << "<div class='col-sm-2' style='padding-top:30px;text-align:right'><label for='allowedMetrics'>AllowedMetrics:</label></div>";

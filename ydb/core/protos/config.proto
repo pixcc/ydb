@@ -1504,6 +1504,12 @@ message THiveConfig {
     optional double NodeUsageRangeToKick = 75 [default = 0.2];
     optional bool LessSystemTabletsMoves = 77 [default = true];
     optional uint64 MaxPingsInFlight = 78 [default = 1000];
+    optional double MinPeriodBetweenRecommendation = 79 [default = 5]; // seconds
+    optional uint64 ScaleOutWindowSize = 80 [default = 5]; // buckets
+    optional uint64 ScaleInWindowSize = 81 [default = 15]; // buckets
+    optional uint64 NodeMetricsWindowSize = 82 [default = 900000]; // milliseconds
+    optional double TargetCpuUtilization = 83 [default = 0.8]; // percent
+    optional double RecommenderThresholdMargin = 84 [default = 0.2]; // percent
 }
 
 message TBlobCacheConfig {

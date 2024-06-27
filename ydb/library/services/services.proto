@@ -1050,5 +1050,6 @@ message TActivity {
         SAMPLE_K_SCAN_ACTOR = 643;
         MEMORY_CONTROLLER = 644;
         BUILD_COLUMNS_SCAN_ACTOR = 645;
+        HIVE_RECOMMENDER_ACTOR = 646;
     };
 };
