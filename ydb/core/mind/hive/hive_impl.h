@@ -51,6 +51,7 @@
 #include "node_info.h"
 #include "storage_group_info.h"
 #include "storage_pool_info.h"
+#include "recommeder.h"
 #include "sequencer.h"
 #include "boot_queue.h"
 #include "object_distribution.h"
@@ -163,6 +164,7 @@ protected:
     friend class THiveBalancer;
     friend class THiveDrain;
     friend class THiveFill;
+    friend class THiveRecommender;
     friend class TReassignTabletWaitActor;
     friend class TMoveTabletWaitActor;
     friend class TStopTabletWaitActor;
@@ -250,6 +252,7 @@ protected:
     void StartHiveDrain(TNodeId nodeId, TDrainSettings settings);
     void StartHiveFill(TNodeId nodeId, const TActorId& initiator);
     void StartHiveStorageBalancer(TStorageBalancerSettings settings);
+    void StartHiveRecommender(TRecommenderSettings&& settings);
     void CreateEvMonitoring(NMon::TEvRemoteHttpInfo::TPtr& ev, const TActorContext& ctx);
     NJson::TJsonValue GetBalancerProgressJson();
     ITransaction* CreateDeleteTablet(TEvHive::TEvDeleteTablet::TPtr& ev);
@@ -400,6 +403,7 @@ protected:
     bool ProcessPendingOperationsScheduled = false;
     bool LogTabletMovesScheduled = false;
     bool ProcessStorageBalancerScheduled = false;
+    bool ProcessRecommenderScheduled = false;
     TResourceRawValues TotalRawResourceValues = {};
     TResourceNormalizedValues TotalNormalizedResourceValues = {};
     TInstant LastResourceChangeReaction;
@@ -471,7 +475,7 @@ protected:
     static constexpr size_t MOVE_SAMPLES_PER_LOG_ENTRY = 10;
     std::unordered_map<TTabletTypes::EType, ui64> TabletMovesByTypeForLog;
     TInstant LogTabletMovesSchedulingTime;
-
+    TResourceRecommendation LastRecommendation;
 
     // to be removed later
     bool TabletOwnersSynced = false;
@@ -569,6 +573,7 @@ protected:
     void Handle(TEvPrivate::TEvProcessIncomingEvent::TPtr& ev);
     void Handle(TEvHive::TEvUpdateDomain::TPtr& ev);
     void Handle(TEvPrivate::TEvDeleteNode::TPtr& ev);
+    void Handle(TEvPrivate::TEvProcessRecommender::TPtr& ev);
 
 protected:
     void RestartPipeTx(ui64 tabletId);
@@ -666,6 +671,7 @@ public:
     void ProcessPendingOperations();
     void ProcessTabletBalancer();
     void ProcessStorageBalancer();
+    void ProcessRecommender();
     const TVector<i64>& GetTabletTypeAllowedMetricIds(TTabletTypes::EType type) const;
     static const TVector<i64>& GetDefaultAllowedMetricIdsForType(TTabletTypes::EType type);
     static bool IsValidMetrics(const NKikimrTabletBase::TMetrics& metrics);
@@ -759,6 +765,10 @@ public:
 
     ui64 GetMaxBootBatchSize() const {
         return CurrentConfig.GetMaxBootBatchSize();
+    }
+
+    TDuration GetMinPeriodBetweenRecommendation() const {
+        return TDuration::Seconds(CurrentConfig.GetMinPeriodBetweenRecommendation());
     }
 
     TResourceNormalizedValues GetMinScatterToBalance() const {

@@ -2219,6 +2219,13 @@ void THive::ProcessStorageBalancer() {
     }
 }
 
+void THive::ProcessRecommender() {
+    if (!ProcessRecommenderScheduled) {
+        Schedule(GetMinPeriodBetweenRecommendation(), new TEvPrivate::TEvProcessRecommender());
+        ProcessRecommenderScheduled = true;
+    }
+}
+
 THive::THiveStats THive::GetStats() const {
     THiveStats stats = {};
     stats.Values.reserve(Nodes.size());
@@ -2456,6 +2463,7 @@ void THive::UpdateTotalResourceValues(
             ProcessBootQueue();
         }
         ProcessTabletBalancer();
+        ProcessRecommender();
         LastResourceChangeReaction = now;
     }
 
@@ -2959,6 +2967,7 @@ void THive::ProcessEvent(std::unique_ptr<IEventHandle> event) {
         hFunc(TEvPrivate::TEvProcessStorageBalancer, Handle);
         hFunc(TEvHive::TEvUpdateDomain, Handle);
         hFunc(TEvPrivate::TEvDeleteNode, Handle);
+        hFunc(TEvPrivate::TEvProcessRecommender, Handle)
     }
 }
 
@@ -3060,6 +3069,7 @@ STFUNC(THive::StateWork) {
         fFunc(TEvHive::TEvUpdateDomain::EventType, EnqueueIncomingEvent);
         fFunc(TEvPrivate::TEvProcessStorageBalancer::EventType, EnqueueIncomingEvent);
         fFunc(TEvPrivate::TEvDeleteNode::EventType, EnqueueIncomingEvent);
+        fFunc(TEvPrivate::TEvProcessRecommender::EventType, EnqueueIncomingEvent);
         hFunc(TEvPrivate::TEvProcessIncomingEvent, Handle);
     default:
         if (!HandleDefaultEvents(ev, SelfId())) {
@@ -3331,6 +3341,16 @@ void THive::Handle(TEvPrivate::TEvDeleteNode::TPtr& ev) {
     if (!node->IsAlive()) {
         TryToDeleteNode(node);
     }
+}
+
+void THive::Handle(TEvPrivate::TEvProcessRecommender::TPtr&) {
+    ProcessRecommenderScheduled = false;
+    StartHiveRecommender({
+        .TargetCpuUtilization = CurrentConfig.GetTargetCpuUtilization(),
+        .ThresholdMargin = CurrentConfig.GetRecommenderThresholdMargin(),
+        .ScaleOutWindowSize = CurrentConfig.GetScaleOutWindowSize(),
+        .ScaleInWindowSize = CurrentConfig.GetScaleInWindowSize()
+    });
 }
 
 TVector<TNodeId> THive::GetNodesForWhiteboardBroadcast(size_t maxNodesToReturn) {

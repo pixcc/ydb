@@ -29,6 +29,7 @@ enum ESimpleCounters {
     COUNTER_IMBALANCED_OBJECTS = 19 [(CounterOpts) = {Name: "ImbalancedObjects"}];
     COUNTER_WORST_OBJECT_VARIANCE = 20 [(CounterOpts) = {Name: "WorstObjectVariance"}];
     COUNTER_STORAGE_SCATTER = 21 [(CounterOpts) = {Name: "StorageScatter"}];
+    COUNTER_RECOMMENDED_CPU = 22 [(CounterOpts) = {Name: "RecommendedCPU"}];
 }
 
 enum ECumulativeCounters {
@@ -46,6 +47,10 @@ enum ECumulativeCounters {
     COUNTER_SUGGESTED_SCALE_DOWN = 11 [(CounterOpts) = {Name: "SuggestedScaleDown"}];
     COUNTER_STORAGE_BALANCER_EXECUTED = 12 [(CounterOpts) = {Name: "StorageBalancerExecuted"}];
     COUNTER_TABLETS_STORAGE_REASSIGNED = 13 [(CounterOpts) = {Name: "TabletsStorageReassigned"}];
+    COUNTER_RECOMMENDER_EXECUTED = 14 [(CounterOpts) = {Name: "RecommenderExecuted"}];
+    COUNTER_RECOMMENDED_SCALE_OUT = 15 [(CounterOpts) = {Name: "RecommendedScaleOut"}];
+    COUNTER_RECOMMENDED_SCALE_IN = 16 [(CounterOpts) = {Name: "RecommendedScaleIn"}];
+    COUNTER_RECOMMENDED_SCALE_NOTHING = 17 [(CounterOpts) = {Name: "RecommendedScaleNothing"}];
 }
 
 enum EPercentileCounters {

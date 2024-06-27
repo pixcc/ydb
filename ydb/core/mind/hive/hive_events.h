@@ -32,6 +32,7 @@ struct TEvPrivate {
         EvProcessStorageBalancer,
         EvStorageBalancerOut,
         EvDeleteNode,
+        EvProcessRecommender,
         EvEnd
     };
 
@@ -117,6 +118,8 @@ struct TEvPrivate {
 
         TEvDeleteNode(TNodeId nodeId) : NodeId(nodeId) {}
     };
+
+    struct TEvProcessRecommender : TEventLocal<TEvProcessRecommender, EvProcessRecommender> {};
 };
 
 } // NHive
