@@ -44,6 +44,7 @@ protected:
         for (const auto& ni : Hive->Nodes) {
             windowSize = std::max(windowSize, ni.second.MaximumCPUUsage.ValuesSize());
             // TODO(pixcc): take it from hive?
+            // TODO(pixcc): don't count alive to prevent scaling to zero in incidents
             if (ni.second.IsAlive()) {
                 CurrentCpuCores += std::get<EResource::CPU>(ni.second.GetResourceMaximumValues()) * 100 / 1000000;
             }
@@ -99,8 +100,6 @@ protected:
         return false;
     }
     
-    // target / cpuTime / maxCpuTime = 60 * maxCpuTime
-
     bool TryRecommendScaleIn() const {
         auto scaleInWindowBegin = AvgUtilizationWindow.end() - ScaleInWindowSize;
         double maxUtilization = *std::max_element(scaleInWindowBegin, AvgUtilizationWindow.end());
@@ -108,9 +107,12 @@ protected:
         if (bottomThreshold > 0 && maxUtilization < bottomThreshold) {
             double ratio = maxUtilization / TargetCpuUtilization;
             ui64 newCpuCores = std::ceil(CurrentCpuCores * ratio);
-            Recommend(newCpuCores);
-            Hive->TabletCounters->Cumulative()[NHive::COUNTER_RECOMMENDED_SCALE_IN].Increment(1);
-            return true;
+            double newUtilization = (CurrentCpuCores * maxUtilization) / newCpuCores;
+            if (newUtilization < TargetCpuUtilization) {
+                Recommend(newCpuCores);
+                Hive->TabletCounters->Cumulative()[NHive::COUNTER_RECOMMENDED_SCALE_IN].Increment(1);
+                return true;
+            }
         }
         return false;
     }
