@@ -1,6 +1,7 @@
 #pragma once
 
 #include "hive.h"
+#include "metrics.h"
 
 namespace NKikimr {
 namespace NHive {
@@ -18,6 +19,8 @@ struct TDomainInfo {
     ui64 TabletsTotal = 0;
     ui64 TabletsAlive = 0;
     ui64 TabletsAliveInObjectDomain = 0;
+
+    TMetricsMaximumUsage UserPoolUsageWindow;
 
     ENodeSelectionPolicy GetNodeSelectionPolicy() const;
 };

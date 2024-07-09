@@ -294,6 +294,11 @@ public:
         return AccumulatorCount >= MaxCount / 2;
     }
 
+    void Clear() {
+        AccumulatorValue = ValueType();
+        AccumulatorCount = 0;
+    }
+
 protected:
     ValueType AccumulatorValue;
     size_t AccumulatorCount;

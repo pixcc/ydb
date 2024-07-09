@@ -193,6 +193,7 @@ protected:
     friend class TTxMonEvent_MemStateTablets;
     friend class TTxMonEvent_MemStateNodes;
     friend class TTxMonEvent_MemStateDomains;
+    friend class TTxMonEvent_Recommender;
     friend class TTxMonEvent_Resources;
     friend class TTxMonEvent_Settings;
     friend class TTxMonEvent_Landing;

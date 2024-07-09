@@ -531,6 +531,143 @@ public:
     }
 };
 
+class TTxMonEvent_Recommender : public TTransactionBase<THive> {
+public:
+    const TActorId Source;
+    THolder<NMon::TEvRemoteHttpInfo> Event;
+    bool BadOnly = false;
+    ui64 MaxCount = 0;
+
+    TTxMonEvent_Recommender(const TActorId &source, NMon::TEvRemoteHttpInfo::TPtr& ev, TSelf *hive)
+        : TBase(hive)
+        , Source(source)
+        , Event(ev->Release())
+    {}
+
+    TTxType GetTxType() const override { return NHive::TXTYPE_MON_MEM_STATE; }
+
+    bool Execute(TTransactionContext &txc, const TActorContext& ctx) override {
+        Y_UNUSED(txc);
+        TStringStream str;
+        RenderHTMLPage(str);
+        ctx.Send(Source, new NMon::TEvRemoteHttpInfoRes(str.Str()));
+        return true;
+    }
+
+    void Complete(const TActorContext& ctx) override {
+        Y_UNUSED(ctx);
+    }
+
+    void RenderHTMLPage(IOutputStream &out) {
+        out << "<script>$('.container').css('width', 'auto');</script>";
+        out << "<table class='simple-table3'>";
+        out << "<thead>";
+        out << "<tr><th style='min-width:300px'>Timestamp</th>";
+        out << "<th style='min-width:300px'>Direction</th>";
+        out << "<th style='min-width:300px'>RecommendedCpuCores</th>";
+        out << "<th style='min-width:300px'>CurrentCpuCores</th>";
+        out << "</tr>";
+        out << "</thead>";
+        out << "<tbody>";
+        out << "<tr>";
+        out << "<td>" << Self->LastRecommendation.Timestamp.ToRfc822String() << "</td>";
+        if (Self->LastRecommendation.Direction == ERecommendationDirection::SCALE_IN) {
+            out << "<td>" << "Scale In" << "</td>";
+        } else if (Self->LastRecommendation.Direction == ERecommendationDirection::SCALE_OUT) {
+            out << "<td>" << "Scale Out" << "</td>";
+        } else {
+            out << "<td>" << "Scale Nothing" << "</td>";
+        }
+        out << "<td>" << Self->LastRecommendation.CpuCores << "</td>";
+        out << "<td>" << Self->LastRecommendation.CurrentCpuCores << "</td>";
+        
+        out << "</tr>";
+        out << "</tbody>";
+        out << "</table>";
+    
+        out << "<table class='table table-sortable'>";
+        out << "<thead>";
+        out << "<tr>";
+        out << "<th>NodeId</th>";
+        out << "<th>State</th>";
+        out << "<th>1</th>";
+        out << "<th>2</th>";
+        out << "<th>3</th>";
+        out << "<th>4</th>";
+        out << "<th>5</th>";
+        out << "<th>6</th>";
+        out << "<th>7</th>";
+        out << "<th>8</th>";
+        out << "<th>9</th>";
+        out << "<th>10</th>";
+        out << "<th>11</th>";
+        out << "<th>12</th>";
+        out << "<th>13</th>";
+        out << "<th>14</th>";
+        out << "<th>15</th>";
+        out << "</tr>";
+        out << "</thead>";
+        out << "<tbody>";
+        out << "<tr>";
+        out << "<td>" << "Total" << "</td>";
+        out << "<td>" << "</td>";
+        size_t i = 0;
+        const auto& values = Self->Domains[Self->PrimaryDomainKey].UserPoolUsageWindow.values();
+        for (auto it = values.rbegin(); it != values.rend(); ++it) {
+            double value = *it * 100;
+
+            // [0; 30] - green
+            // [30; 80] - yellow
+            // [80; 100] - red
+            if (value <= 30) {
+                out << "<td style='color: green'>";
+            } else if (value > 30 && value <= 80) {
+                out << "<td style='color: orange'>";
+            } else {
+                out << "<td style='color: red'>";
+            }
+            out << Sprintf("%.2f", value) << "</td>";
+        
+            ++i;
+        }
+
+        while (i < 15) {
+            out << "<td></td>";
+            ++i;
+        }
+
+        out << "</tr>";
+        for (const auto& [nodeId, node] : Self->Nodes) {
+            out << "<tr>";
+            out << "<td>" << nodeId << "</td>";
+            out << "<td>" << TNodeInfo::EVolatileStateName(node.GetVolatileState()) << "</td>";
+            const auto& history = node.AveragedUserPoolUsageHistory;
+        
+            for (size_t i = history.TotalSize(); i > history.FirstIndex(); --i) {        
+                double value = history[i - 1] * 100;
+
+                // [0; 30] - green
+                // [30; 80] - yellow
+                // [80; 100] - red
+                if (value == 0) {
+                    out << "<td></td>";
+                } else  {
+                    if (value <= 30) {
+                        out << "<td style='color: green'>";
+                    } else if (value > 30 && value <= 80) {
+                        out << "<td style='color: orange'>";
+                    } else {
+                        out << "<td style='color: red'>";
+                    }
+                    out << Sprintf("%.2f", value) << "</td>";
+                }
+            }
+            out << "</tr>";
+        }
+        out << "</tbody>";
+        out << "</table>";
+    }
+};
 
 TString GetDurationString(TDuration duration) {
     int seconds = duration.Seconds();
@@ -1605,6 +1742,9 @@ public:
         out << "</div>";
         out << "<div class='col-sm-1 col-md-1' style='text-align:center'>";
         out << "<button type='button' class='btn btn-info' onclick='location.href=\"app?TabletID=" << Self->HiveId << "&page=OperationsLog&max=100\";' style='width:138px'>Operations Log</button>";
+        out << "</div>";
+        out << "<div class='col-sm-1 col-md-1' style='text-align:center'>";
+        out << "<button type='button' class='btn btn-info' onclick='location.href=\"app?TabletID=" << Self->HiveId << "&page=Recommender\";' style='width:138px'>Recommender</button>";
         out << "</div>";
         out << "</div>";
 
@@ -4397,6 +4537,8 @@ void THive::CreateEvMonitoring(NMon::TEvRemoteHttpInfo::TPtr& ev, const TActorCo
         return Execute(new TTxMonEvent_MemStateNodes(ev->Sender, ev, this), ctx);
     if (page == "MemStateDomains")
         return Execute(new TTxMonEvent_MemStateDomains(ev->Sender, ev, this), ctx);
+    if (page == "Recommender")
+        return Execute(new TTxMonEvent_Recommender(ev->Sender, ev, this), ctx);
     if (page == "DbState")
         return Execute(new TTxMonEvent_DbState(ev->Sender, this), ctx);
     if (page == "SetDown") {

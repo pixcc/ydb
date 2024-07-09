@@ -32,7 +32,8 @@ public:
         db.Table<Schema::SubDomain>()
                 .Key(SubdomainKey.first, SubdomainKey.second)
                 .Update<Schema::SubDomain::Path>(domain->Path)
-                .Update<Schema::SubDomain::HiveId>(domain->HiveId);
+                .Update<Schema::SubDomain::HiveId>(domain->HiveId)
+                .Update<Schema::SubDomain::UserPoolUsageWindow>(domain->UserPoolUsageWindow);
         if (domain->ServerlessComputeResourcesMode) {
             db.Table<Schema::SubDomain>()
                 .Key(SubdomainKey.first, SubdomainKey.second)

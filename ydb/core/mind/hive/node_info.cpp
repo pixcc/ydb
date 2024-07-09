@@ -473,13 +473,11 @@ void TNodeInfo::UpdateResourceTotalUsage(const NKikimrHive::TEvTabletMetrics& me
         AveragedResourceTotalValues.Push(ResourceRawValuesFromMetrics(totalResourceUsage));
         ResourceTotalValues = AveragedResourceTotalValues.GetValue();
 
-        TInstant now = TActivationContext::Now();
         if (totalResourceUsage.HasCPU()) {
+            // TODO(pixcc): maxCPU may change
             auto maxCPU = std::get<NMetrics::EResource::CPU>(ResourceMaximumValues);
             double cpuUsage = maxCPU > 0 ? totalResourceUsage.GetCPU() / static_cast<double>(maxCPU) : 0;
-            MaximumCPUUsage.SetValue(cpuUsage, now);
-        } else {
-            MaximumCPUUsage.AdvanceTime(now);
+            AveragedUserPoolUsage.Push(cpuUsage);
         }
     }
     if (metrics.HasTotalNodeUsage()) {

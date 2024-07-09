@@ -279,6 +279,10 @@ public:
                     domain.ServerlessComputeResourcesMode = domainRowset.GetValue<Schema::SubDomain::ServerlessComputeResourcesMode>();
                 }
                 
+                TDuration NodeMetricsWindowSize = TDuration::MilliSeconds(Self->CurrentConfig.GetNodeMetricsWindowSize());
+                domain.UserPoolUsageWindow.SetWindowSize(NodeMetricsWindowSize, NodeMetricsWindowSize / TDuration::Minutes(1));
+                domain.UserPoolUsageWindow.InitializeFrom(domainRowset.GetValue<Schema::SubDomain::UserPoolUsageWindow>());
+
                 if (!domainRowset.Next())
                     return false;
             }

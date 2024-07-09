@@ -3,6 +3,8 @@
 #include "hive.h"
 #include "tablet_info.h"
 
+#include <library/cpp/containers/ring_buffer/ring_buffer.h>
+
 namespace NKikimr {
 namespace NHive {
 
@@ -77,6 +79,7 @@ public:
     double NodeTotalUsage = 0;
     NMetrics::TFastRiseAverageValue<double, 20> AveragedNodeTotalUsage;
     NMetrics::TAverageValue<double, 20> AveragedNodeTotalCpuUsage;
+    TStaticRingBuffer<double, 15> AveragedUserPoolUsageHistory; // TODO(pixcc): use dynamic size
     TResourceRawValues ResourceMaximumValues;
     TInstant StartTime;
     TNodeLocation Location;
