@@ -15,8 +15,8 @@ protected:
     double ThresholdMargin = 0;
     ui64 ScaleInWindowSize = 0;
     ui64 ScaleOutWindowSize = 0;
-    TMetricsMaximumUsage& UserPoolUsageWindow;
-    ui64 CurrentCpuCores = 0;
+    TMetricsMaximumUsage& CpuUsageWindow;
+    ui64 CurrentNodes = 0;
 
     TString GetLogPrefix() const {
         return Hive->GetLogPrefix();
@@ -42,53 +42,50 @@ protected:
     // TODO(pixcc): usage vs utilization
     void AggregateUtilization() {    
         double usageSum = 0;
-        size_t usageCount = 0;
 
         for (auto& [_, node] : Hive->Nodes) {
             if (node.IsAlive()) {
-                CurrentCpuCores += std::get<EResource::CPU>(node.GetResourceMaximumValues()) * 100 / 1000000;
-                
-                if (node.AveragedUserPoolUsage.IsValueReady()) {
-                    usageSum += node.AveragedUserPoolUsage.GetValue();
-                    ++usageCount;
+                if (node.AveragedNodeTotalCpuUsage.IsValueReady()) {
+                    usageSum += node.AveragedNodeTotalCpuUsage.GetValue();
+                    ++CurrentNodes;
                 }
             }
 
-            node.AveragedUserPoolUsageHistory.PushBack(node.AveragedUserPoolUsage.GetValue());
-            node.AveragedUserPoolUsage.Clear();
+            node.AveragedNodeTotalCpuUsageHistory.PushBack(node.AveragedNodeTotalCpuUsage.GetValue());
+            node.AveragedNodeTotalCpuUsage.Clear();
         }
         
-        double averagedUsage = usageCount > 0 ? usageSum / usageCount : 0;
-        UserPoolUsageWindow.SetValue(averagedUsage);
+        double averagedUsage = CurrentNodes > 0 ? usageSum / CurrentNodes : 0;
+        CpuUsageWindow.SetValue(averagedUsage);
 
         // TODO(pixcc): listen to success, and after that make recommendation
         Hive->Execute(Hive->CreateUpdateDomain(Hive->PrimaryDomainKey));
     }
 
-    void Recommend(ui64 newCpuCores, ERecommendationDirection direction = ERecommendationDirection::SCALE_NOTHING) const {
+    void Recommend(ui64 newNodes, ERecommendationDirection direction = ERecommendationDirection::SCALE_NOTHING) const {
         TResourceRecommendation recommendation = {
-            .CpuCores = newCpuCores,
+            .Nodes = newNodes,
             .Timestamp = TActivationContext::Now(),
-            .CurrentCpuCores = CurrentCpuCores,
+            .CurrentNodes = CurrentNodes,
             .Direction = direction
         };
-        Hive->TabletCounters->Simple()[NHive::COUNTER_RECOMMENDED_CPU].Set(newCpuCores);
+        Hive->TabletCounters->Simple()[NHive::COUNTER_RECOMMENDED_CPU].Set(newNodes);
         Hive->LastRecommendation = recommendation;
     }
 
     void RecommendNothing() const {
-        Recommend(CurrentCpuCores);
+        Recommend(CurrentNodes);
         Hive->TabletCounters->Cumulative()[NHive::COUNTER_RECOMMENDED_SCALE_NOTHING].Increment(1);
     }
 
     bool TryRecommendScaleOut() const {
-        auto scaleOutWindowBegin = UserPoolUsageWindow.values().end() - ScaleOutWindowSize;
-        double minUtilization = *std::min_element(scaleOutWindowBegin, UserPoolUsageWindow.values().end());
+        auto scaleOutWindowBegin = CpuUsageWindow.values().end() - ScaleOutWindowSize;
+        double minUtilization = *std::min_element(scaleOutWindowBegin, CpuUsageWindow.values().end());
         if (TargetCpuUtilization > 0 && minUtilization > TargetCpuUtilization) {
-            double maxUtilization = *std::min_element(scaleOutWindowBegin, UserPoolUsageWindow.values().end());
+            double maxUtilization = *std::min_element(scaleOutWindowBegin, CpuUsageWindow.values().end());
             double ratio = maxUtilization / TargetCpuUtilization;
-            ui64 newCpuCores = std::ceil(CurrentCpuCores * ratio);
-            Recommend(newCpuCores, ERecommendationDirection::SCALE_OUT);
+            ui64 newNodes = std::ceil(CurrentNodes * ratio);
+            Recommend(newNodes, ERecommendationDirection::SCALE_OUT);
             Hive->TabletCounters->Cumulative()[NHive::COUNTER_RECOMMENDED_SCALE_OUT].Increment(1);
             return true;
         }
@@ -96,16 +93,17 @@ protected:
     }
     
     bool TryRecommendScaleIn() const {
-        auto scaleInWindowBegin = UserPoolUsageWindow.values().end() - ScaleInWindowSize;
-        double maxUtilization = *std::max_element(scaleInWindowBegin, UserPoolUsageWindow.values().end());
+        auto scaleInWindowBegin = CpuUsageWindow.values().end() - ScaleInWindowSize;
+        double maxUtilization = *std::max_element(scaleInWindowBegin, CpuUsageWindow.values().end());
         double bottomThreshold = TargetCpuUtilization - ThresholdMargin;
         if (bottomThreshold > 0 && maxUtilization < bottomThreshold) {
             double ratio = maxUtilization / TargetCpuUtilization;
-            ui64 newCpuCores = std::ceil(CurrentCpuCores * ratio);
-            double newUtilization = (CurrentCpuCores * maxUtilization) / newCpuCores;
+            ui64 newNodes = std::ceil(CurrentNodes * ratio);
+            double newUtilization = (CurrentNodes * maxUtilization) / newNodes;
             // TODO(pixcc): margin?
-            if (newUtilization < TargetCpuUtilization) {
-                Recommend(newCpuCores, ERecommendationDirection::SCALE_IN);
+            // TODO(pixcc): remove true and recheck
+            if (true || newUtilization < TargetCpuUtilization) {
+                Recommend(newNodes, ERecommendationDirection::SCALE_IN);
                 Hive->TabletCounters->Cumulative()[NHive::COUNTER_RECOMMENDED_SCALE_IN].Increment(1);
                 return true;
             }
@@ -115,7 +113,7 @@ protected:
 
     void MakeRecommendation() const {
         size_t requiredSize = std::max(ScaleOutWindowSize, ScaleInWindowSize);
-        if (UserPoolUsageWindow.ValuesSize() < requiredSize) {
+        if (CpuUsageWindow.ValuesSize() < requiredSize) {
             RecommendNothing();
             return;
         }
@@ -142,7 +140,7 @@ public:
         , ThresholdMargin(settings.ThresholdMargin)
         , ScaleInWindowSize(settings.ScaleInWindowSize)
         , ScaleOutWindowSize(settings.ScaleOutWindowSize)
-        , UserPoolUsageWindow(Hive->Domains[Hive->PrimaryDomainKey].UserPoolUsageWindow)
+        , CpuUsageWindow(Hive->Domains[Hive->PrimaryDomainKey].UserPoolUsageWindow)
     {}
 
     void Bootstrap() {

@@ -356,7 +356,7 @@ public:
         out << "<table class='table table-sortable'>";
         out << "<thead>";
         out << "<tr><th>NodeId</th><th>Local</th><th>MaximumCPUUsage</th><th>Domains</th><th>TabletsScheduled</th><th>TabletsRunning</th>"
-               "<th>Values</th><th>Total</th><th>Total</th><th>Maximum</th><th>VolatileState</th><th>Location</th>"
+               "<th>Values</th><th>Total</th><th>Total</th><th>NodeTotalCpuUsage</th><th>Maximum</th><th>VolatileState</th><th>Location</th>"
                "<th>LastAlive</th><th>Restarts</th>"
             << "</tr>";
         out << "</thead>";
@@ -380,6 +380,7 @@ public:
             out << "<td>" << GetResourceValuesText(x.ResourceValues) << "</td>";
             out << "<td>" << GetResourceValuesText(x.ResourceTotalValues) << "</td>";
             out << "<td>" << x.NodeTotalUsage << "</td>";
+            out << "<td>" << x.AveragedNodeTotalCpuUsage.GetValue() << "</td>";
             out << "<td>" << GetResourceValuesText(x.ResourceMaximumValues) << "</td>";
             out << "<td>" << TNodeInfo::EVolatileStateName(x.GetVolatileState()) << "</td>";
             out << "<td>" << GetLocationString(x.Location) << "</td>";
@@ -564,8 +565,8 @@ public:
         out << "<thead>";
         out << "<tr><th style='min-width:300px'>Timestamp</th>";
         out << "<th style='min-width:300px'>Direction</th>";
-        out << "<th style='min-width:300px'>RecommendedCpuCores</th>";
-        out << "<th style='min-width:300px'>CurrentCpuCores</th>";
+        out << "<th style='min-width:300px'>RecommendedNodes</th>";
+        out << "<th style='min-width:300px'>CurrentNodes</th>";
         out << "</tr>";
         out << "</thead>";
         out << "<tbody>";
@@ -578,8 +579,8 @@ public:
         } else {
             out << "<td>" << "Scale Nothing" << "</td>";
         }
-        out << "<td>" << Self->LastRecommendation.CpuCores << "</td>";
-        out << "<td>" << Self->LastRecommendation.CurrentCpuCores << "</td>";
+        out << "<td>" << Self->LastRecommendation.Nodes << "</td>";
+        out << "<td>" << Self->LastRecommendation.CurrentNodes << "</td>";
         
         out << "</tr>";
         out << "</tbody>";
@@ -641,7 +642,7 @@ public:
             out << "<tr>";
             out << "<td>" << nodeId << "</td>";
             out << "<td>" << TNodeInfo::EVolatileStateName(node.GetVolatileState()) << "</td>";
-            const auto& history = node.AveragedUserPoolUsageHistory;
+            const auto& history = node.AveragedNodeTotalCpuUsageHistory;
         
             for (size_t i = history.TotalSize(); i > history.FirstIndex(); --i) {        
                 double value = history[i - 1] * 100;

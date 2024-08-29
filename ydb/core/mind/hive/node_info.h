@@ -79,7 +79,7 @@ public:
     double NodeTotalUsage = 0;
     NMetrics::TFastRiseAverageValue<double, 20> AveragedNodeTotalUsage;
     NMetrics::TAverageValue<double, 20> AveragedNodeTotalCpuUsage;
-    TStaticRingBuffer<double, 15> AveragedUserPoolUsageHistory; // TODO(pixcc): use dynamic size
+    TStaticRingBuffer<double, 15>  AveragedNodeTotalCpuUsageHistory; // TODO(pixcc): use dynamic size
     TResourceRawValues ResourceMaximumValues;
     TInstant StartTime;
     TNodeLocation Location;

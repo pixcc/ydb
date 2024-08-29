@@ -18,11 +18,11 @@ enum class ERecommendationDirection {
 };
 
 struct TResourceRecommendation {
-    ui64 CpuCores = 0;
+    ui64 Nodes = 0;
     TInstant Timestamp;
 
     // TODO(pixcc): testing
-    ui64 CurrentCpuCores = 0;
+    ui64 CurrentNodes = 0;
     ERecommendationDirection Direction = ERecommendationDirection::SCALE_NOTHING;
 };
 
