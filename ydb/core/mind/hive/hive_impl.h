@@ -585,6 +585,7 @@ protected:
     void Handle(TEvPrivate::TEvUpdateDataCenterFollowers::TPtr& ev);
     void Handle(TEvHive::TEvRequestScaleRecommendation::TPtr& ev);
     void Handle(TEvPrivate::TEvProcessRecommender::TPtr& ev);
+    void Handle(TEvHive::TEvRequestRecommendation::TPtr& ev);
 
 protected:
     void RestartPipeTx(ui64 tabletId);

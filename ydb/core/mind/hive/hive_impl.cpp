@@ -3174,6 +3174,7 @@ STFUNC(THive::StateWork) {
         fFunc(TEvPrivate::TEvUpdateDataCenterFollowers::EventType, EnqueueIncomingEvent);
         fFunc(TEvHive::TEvRequestScaleRecommendation::EventType, EnqueueIncomingEvent);
         fFunc(TEvPrivate::TEvProcessRecommender::EventType, EnqueueIncomingEvent);
+        fFunc(TEvHive::TEvRequestRecommendation::EventType, EnqueueIncomingEvent);
         hFunc(TEvPrivate::TEvProcessIncomingEvent, Handle);
     default:
         if (!HandleDefaultEvents(ev, SelfId())) {
@@ -3471,12 +3472,18 @@ void THive::Handle(TEvHive::TEvRequestTabletDistribution::TPtr& ev) {
     Send(ev->Sender, response.release());
 }
 
+<<<<<<< HEAD
 void THive::Handle(TEvPrivate::TEvUpdateDataCenterFollowers::TPtr& ev) {
     Execute(CreateUpdateDcFollowers(ev->Get()->DataCenter));
 }
 
 void THive::Handle(TEvHive::TEvRequestScaleRecommendation::TPtr& ev) {
     auto response = std::make_unique<TEvHive::TEvResponseScaleRecommendation>();
+||||||| parent of d5fc1ef97f (Add gRPC API for recommender)
+=======
+void THive::Handle(TEvHive::TEvRequestRecommendation::TPtr& ev) {
+    auto response = std::make_unique<TEvHive::TEvResponseRecommendation>();
+>>>>>>> d5fc1ef97f (Add gRPC API for recommender)
     Send(ev->Sender, response.release());
 }
 
