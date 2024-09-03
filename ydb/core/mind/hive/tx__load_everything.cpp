@@ -858,8 +858,6 @@ public:
         Self->UpdateCounterTabletChannelHistorySize();
         Self->MigrationState = NKikimrHive::EMigrationState::MIGRATION_READY;
         ctx.Send(Self->SelfId(), new TEvPrivate::TEvBootTablets());
-        // TODO(pixcc): maybe start without timeout here + make timeout bigger
-        Self->ProcessRecommender();
 
         for (auto it = Self->Nodes.begin(); it != Self->Nodes.end(); ++it) {
             Self->ScheduleUnlockTabletExecution(it->second);

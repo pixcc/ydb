@@ -8,7 +8,7 @@ namespace NKikimr::NHive {
 
 using namespace NMetrics;
 
-class THiveRecommender : public NActors::TActorBootstrapped<THiveRecommender>, public ISubActor {
+class THiveRecommender : public TActorBootstrapped<THiveRecommender>, public ISubActor {
 protected:
     THive* Hive;
     double TargetCpuUtilization = 0;
