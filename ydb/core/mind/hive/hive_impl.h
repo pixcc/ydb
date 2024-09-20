@@ -51,7 +51,7 @@
 #include "node_info.h"
 #include "storage_group_info.h"
 #include "storage_pool_info.h"
-#include "recommeder.h"
+#include "recommender.h"
 #include "sequencer.h"
 #include "boot_queue.h"
 #include "object_distribution.h"
@@ -483,7 +483,6 @@ protected:
     static constexpr size_t MOVE_SAMPLES_PER_LOG_ENTRY = 10;
     std::unordered_map<TTabletTypes::EType, ui64> TabletMovesByTypeForLog;
     TInstant LogTabletMovesSchedulingTime;
-    TResourceRecommendation LastRecommendation;
 
     // to be removed later
     bool TabletOwnersSynced = false;
@@ -584,8 +583,7 @@ protected:
     void Handle(TEvHive::TEvRequestTabletDistribution::TPtr& ev);
     void Handle(TEvPrivate::TEvUpdateDataCenterFollowers::TPtr& ev);
     void Handle(TEvHive::TEvRequestScaleRecommendation::TPtr& ev);
-    void Handle(TEvPrivate::TEvProcessRecommender::TPtr& ev);
-    void Handle(TEvHive::TEvRequestRecommendation::TPtr& ev);
+    void Handle(TEvPrivate::TEvRefreshScaleRecommendation::TPtr& ev);
 
 protected:
     void RestartPipeTx(ui64 tabletId);
@@ -675,7 +673,6 @@ TTabletInfo* FindTabletEvenInDeleting(TTabletId tabletId, TFollowerId followerId
     void ProcessPendingOperations();
     void ProcessTabletBalancer();
     void ProcessStorageBalancer();
-    void ProcessRecommender();
     const TVector<i64>& GetTabletTypeAllowedMetricIds(TTabletTypes::EType type) const;
     static const TVector<i64>& GetDefaultAllowedMetricIdsForType(TTabletTypes::EType type);
     static bool IsValidMetrics(const NKikimrTabletBase::TMetrics& metrics);
@@ -969,6 +966,10 @@ TTabletInfo* FindTabletEvenInDeleting(TTabletId tabletId, TFollowerId followerId
         return TDuration::MilliSeconds(CurrentConfig.GetStorageInfoRefreshFrequency());
     }
 
+    TDuration GetScaleRecommendationRefreshFrequency() const {
+        return TDuration::MilliSeconds(CurrentConfig.GetScaleRecommendationRefreshFrequency());
+    }
+
     double GetMinStorageScatterToBalance() const {
         return CurrentConfig.GetMinStorageScatterToBalance();
     }
@@ -1055,6 +1056,8 @@ protected:
     void ResolveDomain(TSubDomainKey domain);
     TString GetDomainName(TSubDomainKey domain);
     TSubDomainKey GetMySubDomainKey() const;
+
+    void MakeScaleRecommendation();
 };
 
 } // NHive

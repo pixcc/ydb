@@ -6726,6 +6726,36 @@ Y_UNIT_TEST_SUITE(THiveTest) {
             MakeSureTabletIsUp(runtime, tabletId, 0);
         }
     }
+
+    void RefreshScaleRecommendation(TTestBasicRuntime& runtime) {
+        runtime.AdvanceCurrentTime(TDuration::Minutes(1));
+        TDispatchOptions options;
+        options.FinalEvents.push_back(TDispatchOptions::TFinalEventCondition(NHive::TEvPrivate::EvRefreshScaleRecommendation));
+        runtime.DispatchEvents(options);
+    }
+
+    Y_UNIT_TEST(TestScaleRecommendation) {
+        TTestBasicRuntime runtime(1, false);
+        Setup(runtime, true);
+        TVector<ui64> tabletIds;
+        TActorId sender = runtime.AllocateEdgeActor();
+        const ui64 hiveTablet = MakeDefaultHiveID();
+        CreateTestBootstrapper(runtime, CreateTestTabletInfo(hiveTablet, TTabletTypes::Hive), &CreateDefaultHive);
+
+        RefreshScaleRecommendation(runtime);
+
+        {
+            TDispatchOptions options;
+            options.FinalEvents.push_back(TDispatchOptions::TFinalEventCondition(TEvLocal::EvTabletMetricsAck));
+            runtime.DispatchEvents(options);
+        }
+
+        runtime.SendToPipe(hiveTablet, sender, new TEvInterconnect::TEvNodeDisconnected(runtime.GetNodeId(0)));
+        SendKillLocal(runtime, 0);
+        runtime.Register(CreateTabletKiller(hiveTablet));
+        
+        CreateLocal(runtime, 0);
+    }
 }
 
 Y_UNIT_TEST_SUITE(TStorageBalanceTest) {

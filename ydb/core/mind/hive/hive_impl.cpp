@@ -574,6 +574,7 @@ void THive::Handle(TEvPrivate::TEvBootTablets::TPtr&) {
         }
         SendToRootHivePipe(request.Release());
     }
+    MakeScaleRecommendation();
     ProcessPendingOperations();
 }
 
@@ -2274,13 +2275,6 @@ void THive::ProcessStorageBalancer() {
     }
 }
 
-void THive::ProcessRecommender() {
-    if (!ProcessRecommenderScheduled) {
-        Schedule(GetMinPeriodBetweenRecommendation(), new TEvPrivate::TEvProcessRecommender());
-        ProcessRecommenderScheduled = true;
-    }
-}
-
 THive::THiveStats THive::GetStats() const {
     THiveStats stats = {};
     stats.Values.reserve(Nodes.size());
@@ -2519,7 +2513,6 @@ void THive::UpdateTotalResourceValues(
             ProcessBootQueue();
         }
         ProcessTabletBalancer();
-        ProcessRecommender();
         LastResourceChangeReaction = now;
     }
 
@@ -3068,7 +3061,7 @@ void THive::ProcessEvent(std::unique_ptr<IEventHandle> event) {
         hFunc(TEvHive::TEvRequestTabletDistribution, Handle);
         hFunc(TEvPrivate::TEvUpdateDataCenterFollowers, Handle);
         hFunc(TEvHive::TEvRequestScaleRecommendation, Handle);
-        hFunc(TEvPrivate::TEvProcessRecommender, Handle)
+        hFunc(TEvPrivate::TEvRefreshScaleRecommendation, Handle)
     }
 }
 
@@ -3173,8 +3166,7 @@ STFUNC(THive::StateWork) {
         fFunc(TEvHive::TEvRequestTabletDistribution::EventType, EnqueueIncomingEvent);
         fFunc(TEvPrivate::TEvUpdateDataCenterFollowers::EventType, EnqueueIncomingEvent);
         fFunc(TEvHive::TEvRequestScaleRecommendation::EventType, EnqueueIncomingEvent);
-        fFunc(TEvPrivate::TEvProcessRecommender::EventType, EnqueueIncomingEvent);
-        fFunc(TEvHive::TEvRequestRecommendation::EventType, EnqueueIncomingEvent);
+        fFunc(TEvPrivate::TEvRefreshScaleRecommendation::EventType, EnqueueIncomingEvent);
         hFunc(TEvPrivate::TEvProcessIncomingEvent, Handle);
     default:
         if (!HandleDefaultEvents(ev, SelfId())) {
@@ -3472,29 +3464,86 @@ void THive::Handle(TEvHive::TEvRequestTabletDistribution::TPtr& ev) {
     Send(ev->Sender, response.release());
 }
 
-<<<<<<< HEAD
 void THive::Handle(TEvPrivate::TEvUpdateDataCenterFollowers::TPtr& ev) {
     Execute(CreateUpdateDcFollowers(ev->Get()->DataCenter));
 }
 
-void THive::Handle(TEvHive::TEvRequestScaleRecommendation::TPtr& ev) {
-    auto response = std::make_unique<TEvHive::TEvResponseScaleRecommendation>();
-||||||| parent of d5fc1ef97f (Add gRPC API for recommender)
-=======
-void THive::Handle(TEvHive::TEvRequestRecommendation::TPtr& ev) {
-    auto response = std::make_unique<TEvHive::TEvResponseRecommendation>();
->>>>>>> d5fc1ef97f (Add gRPC API for recommender)
-    Send(ev->Sender, response.release());
+void THive::MakeScaleRecommendation() {
+    BLOG_D("THive::MakeScaleRecommendation()");
+
+    std::unordered_map<TSubDomainKey, double> subdomainToCpuUsageSum;
+    std::unordered_map<TSubDomainKey, size_t> subdomainToReadyNodesCount;
+    for (auto& [_, node] : Nodes) {
+        if (!node.IsAlive()) {
+            continue;
+        }
+
+        if (node.StartTime + TDuration::Seconds(30) < TActivationContext::Now()) {
+            continue;
+        }
+
+        if (!node.AveragedNodeTotalCpuUsage.IsValueReady()) {
+            continue;
+        }
+
+        const auto nodeServicedDomain = node.GetServicedDomain();
+        ++subdomainToReadyNodesCount[nodeServicedDomain];
+        subdomainToCpuUsageSum[nodeServicedDomain] += node.AveragedNodeTotalCpuUsage.GetValue();
+        node.AveragedNodeTotalCpuUsage.Clear();
+    }
+
+    for (auto& [domainKey, domainInfo] : Domains) {
+        // if (autoscaling_enabled)
+        
+        double cpuUsageSum = subdomainToCpuUsageSum[domainKey];
+        size_t readyNodes = subdomainToReadyNodesCount[domainKey];
+        // if (readyNodes == 0) {
+            
+        // }
+        double avgCpuUsage = cpuUsageSum / readyNodes;
+        domainInfo.AvgCpuUsageHistory.PushBack(avgCpuUsage);
+    }
+
+    Domains[GetMySubDomainKey()].LastScaleRecommendation = TScaleRecommendation{
+        .Nodes = TAppData::RandomProvider.Get()->Uniform(100),
+        .Timestamp = TActivationContext::Now()
+    };
+
+    Schedule(GetScaleRecommendationRefreshFrequency(), new TEvPrivate::TEvRefreshScaleRecommendation());
 }
 
-void THive::Handle(TEvPrivate::TEvProcessRecommender::TPtr&) {
-    ProcessRecommenderScheduled = false;
-    StartHiveRecommender({
-        .TargetCpuUtilization = CurrentConfig.GetTargetCpuUtilization(),
-        .ThresholdMargin = CurrentConfig.GetRecommenderThresholdMargin(),
-        .ScaleOutWindowSize = CurrentConfig.GetScaleOutWindowSize(),
-        .ScaleInWindowSize = CurrentConfig.GetScaleInWindowSize()
-    });
+void THive::Handle(TEvPrivate::TEvRefreshScaleRecommendation::TPtr&) {
+    MakeScaleRecommendation();
+}
+
+void THive::Handle(TEvHive::TEvRequestScaleRecommendation::TPtr& ev) {
+    BLOG_D("Handle TEvHive::TEvRequestScaleRecommendation(" << ev->Get()->Record.ShortDebugString() << ")");
+    auto response = std::make_unique<TEvHive::TEvResponseScaleRecommendation>();
+
+    const auto& record = ev->Get()->Record;
+    if (!record.HasDomainKey()) {
+        response->Record.SetStatus(NKikimrProto::ERROR);
+        Send(ev->Sender, response.release());
+        return;
+    }
+
+    const TSubDomainKey domainKey(ev->Get()->Record.GetDomainKey());
+    if (!Domains.contains(domainKey)) {
+        response->Record.SetStatus(NKikimrProto::ERROR);
+        Send(ev->Sender, response.release());
+        return;
+    }
+
+    const TDomainInfo& domainInfo = Domains[domainKey];
+    if (domainInfo.LastScaleRecommendation.Empty()) {
+        response->Record.SetStatus(NKikimrProto::NOTREADY);
+        Send(ev->Sender, response.release());
+        return;
+    }
+
+    response->Record.SetStatus(NKikimrProto::OK);
+    response->Record.SetRecommendedNodes(domainInfo.LastScaleRecommendation->Nodes);
+    Send(ev->Sender, response.release());
 }
 
 TVector<TNodeId> THive::GetNodesForWhiteboardBroadcast(size_t maxNodesToReturn) {

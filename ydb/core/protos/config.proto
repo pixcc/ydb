@@ -1600,6 +1600,7 @@ message THiveConfig {
     optional uint64 NodeMetricsWindowSize = 83 [default = 900000]; // milliseconds
     optional double TargetCpuUtilization = 84 [default = 0.8]; // percent
     optional double RecommenderThresholdMargin = 85 [default = 0.2]; // percent
+    optional uint64 ScaleRecommendationRefreshFrequency = 86 [default = 60000]; // calculate scale recommendation every x milliseconds
 }
 
 message TBlobCacheConfig {

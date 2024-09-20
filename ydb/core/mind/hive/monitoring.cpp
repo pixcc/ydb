@@ -563,108 +563,108 @@ public:
         out << "<script>$('.container').css('width', 'auto');</script>";
         out << "<table class='simple-table3'>";
         out << "<thead>";
-        out << "<tr><th style='min-width:300px'>Timestamp</th>";
-        out << "<th style='min-width:300px'>Direction</th>";
-        out << "<th style='min-width:300px'>RecommendedNodes</th>";
-        out << "<th style='min-width:300px'>CurrentNodes</th>";
-        out << "</tr>";
-        out << "</thead>";
-        out << "<tbody>";
-        out << "<tr>";
-        out << "<td>" << Self->LastRecommendation.Timestamp.ToRfc822String() << "</td>";
-        if (Self->LastRecommendation.Direction == ERecommendationDirection::SCALE_IN) {
-            out << "<td>" << "Scale In" << "</td>";
-        } else if (Self->LastRecommendation.Direction == ERecommendationDirection::SCALE_OUT) {
-            out << "<td>" << "Scale Out" << "</td>";
-        } else {
-            out << "<td>" << "Scale Nothing" << "</td>";
-        }
-        out << "<td>" << Self->LastRecommendation.Nodes << "</td>";
-        out << "<td>" << Self->LastRecommendation.CurrentNodes << "</td>";
+        // out << "<tr><th style='min-width:300px'>Timestamp</th>";
+        // out << "<th style='min-width:300px'>Direction</th>";
+        // out << "<th style='min-width:300px'>RecommendedNodes</th>";
+        // out << "<th style='min-width:300px'>CurrentNodes</th>";
+        // out << "</tr>";
+        // out << "</thead>";
+        // out << "<tbody>";
+        // out << "<tr>";
+        // out << "<td>" << Self->LastRecommendation.Timestamp.ToRfc822String() << "</td>";
+        // if (Self->LastRecommendation.Direction == ERecommendationDirection::SCALE_IN) {
+        //     out << "<td>" << "Scale In" << "</td>";
+        // } else if (Self->LastRecommendation.Direction == ERecommendationDirection::SCALE_OUT) {
+        //     out << "<td>" << "Scale Out" << "</td>";
+        // } else {
+        //     out << "<td>" << "Scale Nothing" << "</td>";
+        // }
+        // out << "<td>" << Self->LastRecommendation.Nodes << "</td>";
+        // out << "<td>" << Self->LastRecommendation.CurrentNodes << "</td>";
         
-        out << "</tr>";
-        out << "</tbody>";
-        out << "</table>";
+        // out << "</tr>";
+        // out << "</tbody>";
+        // out << "</table>";
     
-        out << "<table class='table table-sortable'>";
-        out << "<thead>";
-        out << "<tr>";
-        out << "<th>NodeId</th>";
-        out << "<th>State</th>";
-        out << "<th>1</th>";
-        out << "<th>2</th>";
-        out << "<th>3</th>";
-        out << "<th>4</th>";
-        out << "<th>5</th>";
-        out << "<th>6</th>";
-        out << "<th>7</th>";
-        out << "<th>8</th>";
-        out << "<th>9</th>";
-        out << "<th>10</th>";
-        out << "<th>11</th>";
-        out << "<th>12</th>";
-        out << "<th>13</th>";
-        out << "<th>14</th>";
-        out << "<th>15</th>";
-        out << "</tr>";
-        out << "</thead>";
-        out << "<tbody>";
-        out << "<tr>";
-        out << "<td>" << "Total" << "</td>";
-        out << "<td>" << "</td>";
-        size_t i = 0;
-        const auto& values = Self->Domains[Self->PrimaryDomainKey].UserPoolUsageWindow.values();
-        for (auto it = values.rbegin(); it != values.rend(); ++it) {
-            double value = *it * 100;
+        // out << "<table class='table table-sortable'>";
+        // out << "<thead>";
+        // out << "<tr>";
+        // out << "<th>NodeId</th>";
+        // out << "<th>State</th>";
+        // out << "<th>1</th>";
+        // out << "<th>2</th>";
+        // out << "<th>3</th>";
+        // out << "<th>4</th>";
+        // out << "<th>5</th>";
+        // out << "<th>6</th>";
+        // out << "<th>7</th>";
+        // out << "<th>8</th>";
+        // out << "<th>9</th>";
+        // out << "<th>10</th>";
+        // out << "<th>11</th>";
+        // out << "<th>12</th>";
+        // out << "<th>13</th>";
+        // out << "<th>14</th>";
+        // out << "<th>15</th>";
+        // out << "</tr>";
+        // out << "</thead>";
+        // out << "<tbody>";
+        // out << "<tr>";
+        // out << "<td>" << "Total" << "</td>";
+        // out << "<td>" << "</td>";
+        // size_t i = 0;
+        // const auto& values = Self->Domains[Self->PrimaryDomainKey].UserPoolUsageWindow.values();
+        // for (auto it = values.rbegin(); it != values.rend(); ++it) {
+        //     double value = *it * 100;
 
-            // [0; 30] - green
-            // [30; 80] - yellow
-            // [80; 100] - red
-            if (value <= 30) {
-                out << "<td style='color: green'>";
-            } else if (value > 30 && value <= 80) {
-                out << "<td style='color: orange'>";
-            } else {
-                out << "<td style='color: red'>";
-            }
-            out << Sprintf("%.2f", value) << "</td>";
+        //     // [0; 30] - green
+        //     // [30; 80] - yellow
+        //     // [80; 100] - red
+        //     if (value <= 30) {
+        //         out << "<td style='color: green'>";
+        //     } else if (value > 30 && value <= 80) {
+        //         out << "<td style='color: orange'>";
+        //     } else {
+        //         out << "<td style='color: red'>";
+        //     }
+        //     out << Sprintf("%.2f", value) << "</td>";
         
-            ++i;
-        }
+        //     ++i;
+        // }
 
-        while (i < 15) {
-            out << "<td></td>";
-            ++i;
-        }
+        // while (i < 15) {
+        //     out << "<td></td>";
+        //     ++i;
+        // }
 
-        out << "</tr>";
-        for (const auto& [nodeId, node] : Self->Nodes) {
-            out << "<tr>";
-            out << "<td>" << nodeId << "</td>";
-            out << "<td>" << TNodeInfo::EVolatileStateName(node.GetVolatileState()) << "</td>";
-            const auto& history = node.AveragedNodeTotalCpuUsageHistory;
+        // out << "</tr>";
+        // for (const auto& [nodeId, node] : Self->Nodes) {
+        //     out << "<tr>";
+        //     out << "<td>" << nodeId << "</td>";
+        //     out << "<td>" << TNodeInfo::EVolatileStateName(node.GetVolatileState()) << "</td>";
+        //     const auto& history = node.AveragedNodeTotalCpuUsageHistory;
         
-            for (size_t i = history.TotalSize(); i > history.FirstIndex(); --i) {        
-                double value = history[i - 1] * 100;
+        //     for (size_t i = history.TotalSize(); i > history.FirstIndex(); --i) {        
+        //         double value = history[i - 1] * 100;
 
-                // [0; 30] - green
-                // [30; 80] - yellow
-                // [80; 100] - red
-                if (value == 0) {
-                    out << "<td></td>";
-                } else  {
-                    if (value <= 30) {
-                        out << "<td style='color: green'>";
-                    } else if (value > 30 && value <= 80) {
-                        out << "<td style='color: orange'>";
-                    } else {
-                        out << "<td style='color: red'>";
-                    }
-                    out << Sprintf("%.2f", value) << "</td>";
-                }
-            }
-            out << "</tr>";
-        }
+        //         // [0; 30] - green
+        //         // [30; 80] - yellow
+        //         // [80; 100] - red
+        //         if (value == 0) {
+        //             out << "<td></td>";
+        //         } else  {
+        //             if (value <= 30) {
+        //                 out << "<td style='color: green'>";
+        //             } else if (value > 30 && value <= 80) {
+        //                 out << "<td style='color: orange'>";
+        //             } else {
+        //                 out << "<td style='color: red'>";
+        //             }
+        //             out << Sprintf("%.2f", value) << "</td>";
+        //         }
+        //     }
+        //     out << "</tr>";
+        // }
         out << "</tbody>";
         out << "</table>";
     }
