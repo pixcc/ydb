@@ -3,8 +3,6 @@
 #include "hive.h"
 #include "metrics.h"
 
-#include <library/cpp/containers/ring_buffer/ring_buffer.h>
-
 namespace NKikimr {
 namespace NHive {
 
@@ -27,7 +25,7 @@ struct TDomainInfo {
     ui64 TabletsAlive = 0;
     ui64 TabletsAliveInObjectDomain = 0;
     
-    TStaticRingBuffer<double, 20> AvgCpuUsageHistory;
+    std::deque<double> AvgCpuUsageHistory;
     TMaybeFail<TScaleRecommendation> LastScaleRecommendation;
 
     ENodeSelectionPolicy GetNodeSelectionPolicy() const;

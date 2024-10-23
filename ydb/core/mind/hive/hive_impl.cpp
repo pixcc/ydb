@@ -3468,46 +3468,117 @@ void THive::Handle(TEvPrivate::TEvUpdateDataCenterFollowers::TPtr& ev) {
     Execute(CreateUpdateDcFollowers(ev->Get()->DataCenter));
 }
 
-void THive::MakeScaleRecommendation() {
-    BLOG_D("THive::MakeScaleRecommendation()");
+template<typename It>
+ui32 THive::CalculateRecommendedNodes(It windowBegin, It windowEnd, size_t readyNodes, double target) {
+    double maxOnWindow = *std::max_element(windowBegin, windowEnd);
+    double ratio = maxOnWindow / target;
+    return std::ceil(readyNodes * ratio);
+}
 
-    std::unordered_map<TSubDomainKey, double> subdomainToCpuUsageSum;
-    std::unordered_map<TSubDomainKey, size_t> subdomainToReadyNodesCount;
-    for (auto& [_, node] : Nodes) {
+void THive::MakeScaleRecommendation() {
+    BLOG_D("[MSR] Started making scale recommendation");
+
+    // TODO(pixcc): make following variables as configurable settings
+    constexpr TDuration NODE_INITILIZATION_TIME = TDuration::Seconds(30);
+    constexpr size_t MAX_HISTORY_SIZE = 15;
+    constexpr size_t SCALE_IN_WINDOW_SIZE = 5;
+    constexpr size_t SCALE_OUT_WINDOW_SIZE = 15;
+    constexpr double TARGET_AVG_CPU_USAGE_PERCENT = 0.66;
+    constexpr double CPU_USAGE_MARGIN = 0.2;
+
+    double cpuUsageSum = 0;
+    size_t readyNodesCount = 0;
+    for (auto& [id, node] : Nodes) {
         if (!node.IsAlive()) {
+            BLOG_TRACE("[MSR] Skip node " << id << ", not alive");
             continue;
         }
 
-        if (node.StartTime + TDuration::Seconds(30) < TActivationContext::Now()) {
+        if (node.StartTime + NODE_INITILIZATION_TIME > TActivationContext::Now()) {
+            BLOG_TRACE("[MSR] Skip node " << id << ", in initialization");
             continue;
         }
 
         if (!node.AveragedNodeTotalCpuUsage.IsValueReady()) {
+            BLOG_TRACE("[MSR] Skip node " << id << ", no CPU usage value");
             continue;
         }
 
-        const auto nodeServicedDomain = node.GetServicedDomain();
-        ++subdomainToReadyNodesCount[nodeServicedDomain];
-        subdomainToCpuUsageSum[nodeServicedDomain] += node.AveragedNodeTotalCpuUsage.GetValue();
+        if (node.GetServicedDomain() != GetMySubDomainKey()) {
+            BLOG_TRACE("[MSR] Skip node " << id << ", serviced domain doesn't match");
+            continue;
+        }
+
+        double avgCpuUsage = node.AveragedNodeTotalCpuUsage.GetValue();
+        BLOG_TRACE("[MSR] Node " << id << " is ready, Avg CPU Usage " << avgCpuUsage);
+        ++readyNodesCount;
+
+        cpuUsageSum += avgCpuUsage;
         node.AveragedNodeTotalCpuUsage.Clear();
     }
 
-    for (auto& [domainKey, domainInfo] : Domains) {
-        // if (autoscaling_enabled)
-        
-        double cpuUsageSum = subdomainToCpuUsageSum[domainKey];
-        size_t readyNodes = subdomainToReadyNodesCount[domainKey];
-        // if (readyNodes == 0) {
-            
-        // }
-        double avgCpuUsage = cpuUsageSum / readyNodes;
-        domainInfo.AvgCpuUsageHistory.PushBack(avgCpuUsage);
+    auto& domain = Domains[GetMySubDomainKey()];
+    auto& avgCpuUsageHistory = domain.AvgCpuUsageHistory;
+
+    double avgCpuUsage = readyNodesCount != 0 ? cpuUsageSum / readyNodesCount : 0;
+    BLOG_D("[MSR] Total Avg CPU Usage " << avgCpuUsage);
+
+    avgCpuUsageHistory.push_back(avgCpuUsage);
+    if (avgCpuUsageHistory.size() > MAX_HISTORY_SIZE) {
+        avgCpuUsageHistory.pop_front();
     }
 
-    Domains[GetMySubDomainKey()].LastScaleRecommendation = TScaleRecommendation{
-        .Nodes = TAppData::RandomProvider.Get()->Uniform(100),
-        .Timestamp = TActivationContext::Now()
-    };
+    ui32 recommendedNodes = 0;
+
+    if (avgCpuUsageHistory.size() >= SCALE_IN_WINDOW_SIZE) {
+        auto scaleInWindowBegin = avgCpuUsageHistory.end() - SCALE_IN_WINDOW_SIZE;
+        auto scaleInWindowEnd = avgCpuUsageHistory.end();
+        double usageBottomThreshold = TARGET_AVG_CPU_USAGE_PERCENT - CPU_USAGE_MARGIN;
+
+        bool needScaleIn = std::all_of(
+            scaleInWindowBegin,
+            scaleInWindowEnd,
+            [usageBottomThreshold](double value){ return value < usageBottomThreshold; }
+        );
+
+        if (needScaleIn) {
+            recommendedNodes = CalculateRecommendedNodes(
+                scaleInWindowBegin,
+                scaleInWindowEnd,
+                readyNodesCount,
+                TARGET_AVG_CPU_USAGE_PERCENT
+            );
+            BLOG_D("[MSR] Need scale in: " << readyNodesCount << " -> " << recommendedNodes);
+        }
+    }
+
+    if (avgCpuUsageHistory.size() >= SCALE_OUT_WINDOW_SIZE) {
+        auto scaleOutWindowBegin = avgCpuUsageHistory.end() - SCALE_OUT_WINDOW_SIZE;
+        auto scaleOutWindowEnd = avgCpuUsageHistory.end();
+
+        bool needScaleOut = std::all_of(
+            scaleOutWindowBegin,
+            scaleOutWindowEnd,
+            [](double value){ return value > TARGET_AVG_CPU_USAGE_PERCENT; }
+        );
+
+        if (needScaleOut) {
+            recommendedNodes = CalculateRecommendedNodes(
+                scaleOutWindowBegin,
+                scaleOutWindowEnd,
+                readyNodesCount,
+                TARGET_AVG_CPU_USAGE_PERCENT
+            );
+            BLOG_D("[MSR] Need scale out: " << readyNodesCount << " -> " << recommendedNodes);
+        }
+    }
+
+    if (recommendedNodes != 0) {
+        domain.LastScaleRecommendation = TScaleRecommendation{
+            .Nodes = recommendedNodes,
+            .Timestamp = TActivationContext::Now()
+        };
+    }
 
     Schedule(GetScaleRecommendationRefreshFrequency(), new TEvPrivate::TEvRefreshScaleRecommendation());
 }
