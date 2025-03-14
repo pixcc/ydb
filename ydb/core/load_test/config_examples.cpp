@@ -67,6 +67,13 @@ TVector<TConfigTemplate> BuildExamples() {
     BlockSize: 1048576
     IntervalUs: 9000000
 })_"
+        },
+        TConfigTemplate{
+            .LoadName = "RegisterNodeLoad",
+            .Template = R"_(RegisterNodeLoad: {
+    DurationSeconds: 3600
+    IcPortOffset: 0
+})_"
         }
     };
     return result;

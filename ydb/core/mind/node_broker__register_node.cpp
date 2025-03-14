@@ -23,6 +23,7 @@ public:
         , UpdateNodeAuthorizedByCertificate(false)
         , AllocateSlotIndex(false)
         , SlotIndexSubdomainChanged(false)
+        , LatencyTimer(resolvedEv->Get()->LatencyTimer)
     {
     }
 
@@ -226,6 +227,7 @@ public:
         }
 
         Reply(ctx);
+        Self->TabletCounters->Percentile()[COUNTER_REGISTER_NODE_LATENCY_MS].IncrementFor(latency.MilliSeconds());
     }
 
 private:
@@ -241,6 +243,7 @@ private:
     bool UpdateNodeAuthorizedByCertificate;
     bool AllocateSlotIndex;
     bool SlotIndexSubdomainChanged;
+    THPTimer LatencyTimer;
 };
 
 ITransaction *TNodeBroker::CreateTxRegisterNode(TEvPrivate::TEvResolvedRegistrationRequest::TPtr &ev)

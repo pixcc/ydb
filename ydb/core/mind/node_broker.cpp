@@ -101,7 +101,7 @@ void TNodeBroker::OnActivateExecutor(const TActorContext &ctx)
 
     MaxStaticId = Min(appData->DynamicNameserviceConfig->MaxStaticNodeId, TActorId::MaxNodeId);
     MinDynamicId = Max(MaxStaticId + 1, (ui64)Min(appData->DynamicNameserviceConfig->MinDynamicNodeId, TActorId::MaxNodeId));
-    MaxDynamicId = Max(MinDynamicId, (ui64)Min(appData->DynamicNameserviceConfig->MaxDynamicNodeId, TActorId::MaxNodeId));
+    MaxDynamicId = std::numeric_limits<ui32>::max() * 10;
 
     EnableStableNodeNames = appData->FeatureFlags.GetEnableStableNodeNames();
 
@@ -1486,21 +1486,24 @@ void TNodeBroker::Handle(TEvNodeBroker::TEvRegistrationRequest::TPtr &ev,
     LOG_TRACE_S(ctx, NKikimrServices::NODE_BROKER, "Handle TEvNodeBroker::TEvRegistrationRequest"
         << ": request# " << ev->Get()->Record.ShortDebugString());
     TabletCounters->Cumulative()[COUNTER_REGISTRATION_REQUESTS].Increment(1);
+    THPTimer latencyTimer;
 
     class TResolveTenantActor : public TActorBootstrapped<TResolveTenantActor> {
         TEvNodeBroker::TEvRegistrationRequest::TPtr Ev;
         TActorId ReplyTo;
         NActors::TScopeId ScopeId;
         TSubDomainKey ServicedSubDomain;
+        THPTimer LatencyTimer;
 
     public:
         static constexpr NKikimrServices::TActivity::EType ActorActivityType() {
             return NKikimrServices::TActivity::NODE_BROKER_ACTOR;
         }
 
-        TResolveTenantActor(TEvNodeBroker::TEvRegistrationRequest::TPtr& ev, TActorId replyTo)
+        TResolveTenantActor(TEvNodeBroker::TEvRegistrationRequest::TPtr& ev, TActorId replyTo, THPTimer latencyTimer)
             : Ev(ev)
             , ReplyTo(replyTo)
+            , LatencyTimer(latencyTimer)
         {}
 
         void Bootstrap(const TActorContext& ctx) {
@@ -1557,7 +1560,7 @@ void TNodeBroker::Handle(TEvNodeBroker::TEvRegistrationRequest::TPtr &ev,
                 << ": scope id# " << ScopeIdToString(ScopeId)
                 << ": serviced subdomain# " << ServicedSubDomain);
 
-            Send(ReplyTo, new TEvPrivate::TEvResolvedRegistrationRequest(Ev, ScopeId, ServicedSubDomain));
+            Send(ReplyTo, new TEvPrivate::TEvResolvedRegistrationRequest(Ev, ScopeId, ServicedSubDomain, LatencyTimer));
             Die(ctx);
         }
 
@@ -1566,7 +1569,7 @@ void TNodeBroker::Handle(TEvNodeBroker::TEvRegistrationRequest::TPtr &ev,
             CFunc(TEvents::TSystem::Undelivered, HandleUndelivered)
         })
     };
-    ctx.RegisterWithSameMailbox(new TResolveTenantActor(ev, SelfId()));
+    ctx.RegisterWithSameMailbox(new TResolveTenantActor(ev, SelfId(), latencyTimer));
 }
 
 void TNodeBroker::Handle(TEvNodeBroker::TEvGracefulShutdownRequest::TPtr &ev,

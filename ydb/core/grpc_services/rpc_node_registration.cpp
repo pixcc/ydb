@@ -1,5 +1,6 @@
 #include "service_discovery.h"
 
+#include <ydb/core/base/counters.h>
 #include <ydb/core/grpc_services/base/base.h>
 #include <ydb/core/base/feature_flags.h>
 #include <ydb/library/actors/core/actor_bootstrapped.h>
@@ -34,6 +35,11 @@ public:
     {}
 
     void Bootstrap(const TActorContext& ctx) {
+        auto counters = GetServiceCounters(AppData()->Counters, "utils");
+        LatenciesMs = counters->GetHistogram("GRpcRegisterNodeLatenciesMs",
+            NMonitoring::ExponentialHistogram(20, 2, 1));
+        LatencyTimer.Reset();
+
         auto req = dynamic_cast<TEvNodeRegistrationRequest*>(Request.get());
         Y_ABORT_UNLESS(req, "Unexpected request type for TNodeRegistrationRPC");
 
@@ -148,6 +154,8 @@ public:
     void SendReplyAndDie(const TActorContext &ctx)
     {
         Request->SendResult(Result, Status);
+        TDuration passed = TDuration::Seconds(LatencyTimer.Passed());
+        LatenciesMs->Collect(passed.MilliSeconds());
         Die(ctx);
     }
 
@@ -254,6 +262,8 @@ private:
     Ydb::StatusIds_StatusCode Status = Ydb::StatusIds::SUCCESS;
     TActorId NodeBrokerPipe;
     bool IsNodeAuthorizedByCertificate = false;
+    THPTimer LatencyTimer;
+    NMonitoring::THistogramPtr LatenciesMs;
 };
 
 void DoNodeRegistrationRequest(std::unique_ptr<IRequestOpCtx> p, const IFacilityProvider& f) {

@@ -59,6 +59,10 @@ namespace NKikimr {
             const NActors::TActorId& parent, const TIntrusivePtr<::NMonitoring::TDynamicCounters>& counters,
             ui64 index, ui64 tag);
 
+    NActors::IActor *CreateRegisterNodeLoadActor(const NKikimr::TEvLoadTestRequest::TRegisterNodeLoad& cmd,
+            const NActors::TActorId& parent, const TIntrusivePtr<::NMonitoring::TDynamicCounters>& counters,
+            ui64 index, ui64 tag);
+
 #define VERIFY_PARAM2(FIELD, NAME) \
     do { \
         if (!(FIELD).Has##NAME()) { \

@@ -1234,6 +1234,10 @@ void TKikimrRunner::InitializeAppData(const TKikimrRunConfig& runConfig)
         AppData->GraphConfig.CopyFrom(runConfig.AppConfig.GetGraphConfig());
     }
 
+    if (runConfig.AppConfig.HasGRpcConfig()) {
+        AppData->GrpcConfig.CopyFrom(runConfig.AppConfig.GetGRpcConfig());
+    }
+
     if (runConfig.AppConfig.HasMetadataCacheConfig()) {
         AppData->MetadataCacheConfig.CopyFrom(runConfig.AppConfig.GetMetadataCacheConfig());
     }

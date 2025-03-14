@@ -42,6 +42,7 @@ SRCS(
     group_write.cpp
     vdisk_write.cpp
     yql_single_query.cpp
+    register_node.cpp
 
     ycsb/actors.h
     ycsb/bulk_mkql_upsert.cpp

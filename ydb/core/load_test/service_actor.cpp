@@ -80,6 +80,8 @@ const google::protobuf::Message* GetCommandFromRequest(const TEvLoadTestRequest&
         return &request.GetStop();
     case TEvLoadTestRequest::CommandCase::kYCSBLoad:
         return &request.GetYCSBLoad();
+    case TEvLoadTestRequest::CommandCase::kRegisterNodeLoad:
+        return &request.GetRegisterNodeLoad();
     default:
         return nullptr;
     }
@@ -107,6 +109,8 @@ ui64 ExtractTagFromCommand(const TEvLoadTestRequest& request) {
         return request.GetStop().GetTag();
     case TEvLoadTestRequest::CommandCase::kYCSBLoad:
         return request.GetYCSBLoad().GetTag();
+    case TEvLoadTestRequest::CommandCase::kRegisterNodeLoad:
+        return request.GetRegisterNodeLoad().GetTag();
     default:
         return Max<ui64>();
     }
@@ -597,6 +601,18 @@ public:
                 LOG_D("Create new YCSB load actor with tag# " << tag);
                 LoadActors.emplace(tag, TlsActivationContext->Register(NDataShardLoad::CreateTestLoadActor(
                             cmd, SelfId(), GetServiceCounters(Counters, "load_actor"), tag)));
+                break;
+            }
+
+            case NKikimr::TEvLoadTestRequest::CommandCase::kRegisterNodeLoad: {
+                const auto& cmd = record.GetRegisterNodeLoad();
+                if (LoadActors.count(tag) != 0) {
+                    ythrow TLoadActorException() << Sprintf("duplicate load actor with Tag# %" PRIu64, tag);
+                }
+
+                LOG_D("Create new Register Node load actor with tag# " << tag);
+                LoadActors.emplace(tag, TlsActivationContext->Register(CreateRegisterNodeLoadActor(
+                            cmd, SelfId(), GetServiceCounters(Counters, "utils"), 0, tag)));
                 break;
             }
 

@@ -66,15 +66,18 @@ public:
             TEvResolvedRegistrationRequest(
                     TEvNodeBroker::TEvRegistrationRequest::TPtr request,
                     NActors::TScopeId scopeId,
-                    TSubDomainKey servicedSubDomain)
+                    TSubDomainKey servicedSubDomain,
+                    THPTimer latencyTimer)
                 : Request(request)
                 , ScopeId(scopeId)
                 , ServicedSubDomain(servicedSubDomain)
+                , LatencyTimer(latencyTimer)
             {}
 
             TEvNodeBroker::TEvRegistrationRequest::TPtr Request;
             NActors::TScopeId ScopeId;
             TSubDomainKey ServicedSubDomain;
+            THPTimer LatencyTimer;
         };
 
         struct TEvProcessSubscribersQueue : public TEventLocal<TEvProcessSubscribersQueue, EvProcessSubscribersQueue> {};
