@@ -16,6 +16,103 @@
 
 namespace NKikimr {
 
+class TRegisterNodeLoadWorkerActor : public TActorBootstrapped<TRegisterNodeLoadWorkerActor> {
+public:
+    static constexpr auto ActorActivityType() {
+        return NKikimrServices::TActivity::KQP_TEST_WORKLOAD;
+    }
+
+    TRegisterNodeLoadWorkerActor(ui32 durationSeconds, ui64 icPort, NMonitoring::TDynamicCounters::TCounterPtr registrations,
+        NMonitoring::THistogramPtr latenciesMs)
+        : DurationSeconds(durationSeconds)
+        , IcPort(icPort)
+        , Registrations(registrations)
+        , LatenciesMs(latenciesMs)
+        , Client(NConfig::MakeDefaultNodeBrokerClient())
+        , Env(NConfig::MakeDefaultEnv())
+        , Logger(NConfig::MakeNoopInitLogger())
+    {
+        Y_ASSERT(DurationSeconds > DelayBeforeMeasurements.Seconds());
+
+        GrpcSettings.PathToGrpcCaFile = AppData()->GrpcConfig.GetPathToCaFile();
+        GrpcSettings.PathToGrpcCertFile = AppData()->GrpcConfig.GetPathToCertificateFile();
+        GrpcSettings.PathToGrpcPrivateKeyFile = AppData()->GrpcConfig.GetPathToPrivateKeyFile();
+
+        NodeBrokerAddrs = {
+            "vla5-2583.search.yandex.net:2135",
+            "vla5-2585.search.yandex.net:2135",
+            "vla5-2594.search.yandex.net:2135",
+            "vla5-2584.search.yandex.net:2135",
+            "vla5-2586.search.yandex.net:2135",
+            "vla5-2592.search.yandex.net:2135"
+        };
+
+        Settings = {
+            AppData()->DomainsConfig.GetDomain(0).GetName(),
+            Env->FQDNHostName(),
+            "",
+            "",
+            AppData()->TenantName,
+            false,
+            IcPort,
+            {},
+            "root@builtin",
+        };
+    }
+
+    void Bootstrap(const TActorContext& ctx) {
+        Become(&TRegisterNodeLoadWorkerActor::StateMain);
+        ctx.Schedule(TDuration::Seconds(DurationSeconds), new TEvents::TEvPoisonPill);
+        SendRegistrationQuery();
+    }
+
+    STRICT_STFUNC(StateMain,
+        cFunc(TEvents::TSystem::PoisonPill, HandlePoisonPill)
+        cFunc(TEvents::TSystem::Wakeup, HandleWakeup)
+    )
+
+    void SendRegistrationQuery() {
+        ShuffleRange(NodeBrokerAddrs);
+        auto settings = Settings;
+        settings.NodeHost = Settings.NodeHost + ToString(SelfId().NodeId()) + ToString(Offset);
+        Offset++;
+
+        Registrations->Inc();
+        THPTimer timer;
+        auto result = Client->RegisterDynamicNode(GrpcSettings, NodeBrokerAddrs, settings, *Env, *Logger);
+        // TODO(pixcc): no Apply that can be costly
+        TDuration passed = TDuration::Seconds(timer.Passed());
+        LatenciesMs->Collect(passed.MilliSeconds());
+        Schedule(TDuration::Seconds(45), new TEvents::TEvWakeup);
+    }
+
+    void HandleWakeup() {
+        SendRegistrationQuery();
+    }
+
+    private:
+        void HandlePoisonPill() {
+            PassAway();
+        }
+
+        // common
+        ui32 DurationSeconds;
+        ui64 Offset = 0;
+        ui32 IcPort;
+
+        // Monitoring
+        NMonitoring::TDynamicCounters::TCounterPtr Registrations;
+        NMonitoring::THistogramPtr LatenciesMs;
+
+        std::unique_ptr<NConfig::INodeBrokerClient> Client;
+        std::unique_ptr<NConfig::IEnv> Env;
+        std::unique_ptr<NConfig::IInitLogger> Logger;
+
+        NConfig::TNodeRegistrationSettings Settings;
+        NConfig::TGrpcSslSettings GrpcSettings;
+        TVector<TString> NodeBrokerAddrs;
+};
+
 class TRegisterNodeLoadActor : public TActorBootstrapped<TRegisterNodeLoadActor> {
 public:
     static constexpr auto ActorActivityType() {
@@ -41,31 +138,6 @@ public:
 
         Y_ASSERT(DurationSeconds > DelayBeforeMeasurements.Seconds());
 
-        GrpcSettings.PathToGrpcCaFile = AppData()->GrpcConfig.GetPathToCaFile();
-        GrpcSettings.PathToGrpcCertFile = AppData()->GrpcConfig.GetPathToCertificateFile();
-        GrpcSettings.PathToGrpcPrivateKeyFile = AppData()->GrpcConfig.GetPathToPrivateKeyFile();
-
-        NodeBrokerAddrs = {
-            "vla5-2583.search.yandex.net:2135",
-            "vla5-2585.search.yandex.net:2135",
-            "vla5-2594.search.yandex.net:2135",
-            "vla5-2584.search.yandex.net:2135",
-            "vla5-2586.search.yandex.net:2135",
-            "vla5-2592.search.yandex.net:2135"
-        };
-
-        Settings = {
-            AppData()->DomainsConfig.GetDomain(0).GetName(),
-            Env->FQDNHostName(),
-            "",
-            "",
-            AppData()->TenantName,
-            false,
-            0,
-            {},
-            "root@builtin",
-        };
-
         // Monitoring initialization
 
         LoadCounters = counters->GetSubgroup("tag", Sprintf("%" PRIu64, tag));
@@ -87,35 +159,16 @@ public:
         EarlyStop = false;
         ctx.Schedule(TDuration::Seconds(DurationSeconds), new TEvents::TEvPoisonPill);
         TestStartTime = TAppData::TimeProvider->Now();
-        SendRegistrationQuery();
+
+        for (size_t i = 0; i < 10; ++i) {
+            Workers.push_back(Register(new TRegisterNodeLoadWorkerActor(DurationSeconds, i, Registrations, LatenciesMs)));
+        }
     }
 
     STRICT_STFUNC(StateMain,
         CFunc(TEvents::TSystem::PoisonPill, HandlePoisonPill)
-        cFunc(TEvents::TSystem::Wakeup, HandleWakeup)
         HFunc(NMon::TEvHttpInfo, HandleHTML)
     )
-
-    void SendRegistrationQuery() {
-        ShuffleRange(NodeBrokerAddrs);
-        auto settings = Settings;
-        settings.NodeHost = Settings.NodeHost + ToString(Offset);
-        Offset++;
-        settings.InterconnectPort = SelfId().NodeId();
-        
-        Registrations->Inc();
-        THPTimer timer;
-        auto result = Client->RegisterDynamicNode(GrpcSettings, NodeBrokerAddrs, settings, *Env, *Logger);
-        // TODO(pixcc): no Apply that can be costly
-        TDuration passed = TDuration::Seconds(timer.Passed());
-        LatencyHist.RecordValue(passed.MicroSeconds());
-        LatenciesMs->Collect(passed.MilliSeconds());
-        Send(SelfId(), new TEvents::TEvWakeup);
-    }
-
-    void HandleWakeup() {
-        SendRegistrationQuery();
-    }
 
 private:
 
@@ -130,13 +183,16 @@ private:
 
     void StartDeathProcess(const TActorContext& ctx) {
         LOG_NOTICE_S(ctx, NKikimrServices::KQP_LOAD_TEST, "Tag# " << Tag << " TRegisterNodeLoadActor StartDeathProcess called");
+        for (const auto& worker : Workers) {
+            ctx.Send(worker, new TEvents::TEvPoisonPill);
+        }
         DeathReport(ctx);
     }
 
     void DeathReport(const TActorContext& ctx) {
         TIntrusivePtr<TEvLoad::TLoadReport> report = nullptr;
         TString errorReason;
- 
+
         if (EarlyStop) {
             errorReason = "Abort, stop signal received";
         } else {
@@ -265,6 +321,8 @@ private:
     NConfig::TNodeRegistrationSettings Settings;
     NConfig::TGrpcSslSettings GrpcSettings;
     TVector<TString> NodeBrokerAddrs;
+
+    TVector<TActorId> Workers;
 };
 
 IActor * CreateRegisterNodeLoadActor(const NKikimr::TEvLoadTestRequest::TRegisterNodeLoad& cmd,
