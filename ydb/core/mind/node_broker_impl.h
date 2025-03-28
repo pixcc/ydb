@@ -86,7 +86,7 @@ public:
 private:
     using TActorBase = TActor<TNodeBroker>;
 
-    static constexpr TDuration MIN_LEASE_DURATION = TDuration::Minutes(5);
+    static constexpr TDuration MIN_LEASE_DURATION = TDuration::Minutes(1);
 
 
     struct TNodeInfo : public TEvInterconnect::TNodeInfo {

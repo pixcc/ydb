@@ -22,38 +22,36 @@ public:
         return NKikimrServices::TActivity::KQP_TEST_WORKLOAD;
     }
 
-    TRegisterNodeLoadWorkerActor(ui32 durationSeconds, ui64 icPort, NMonitoring::TDynamicCounters::TCounterPtr registrations,
+    TRegisterNodeLoadWorkerActor(ui64 icPort,
+        const TVector<TString>& nodeBrokerAddresses,
+        TDuration intervalSeconds,
+        std::optional<ui64> maxNodes,
+        bool fixNodeId,
+        NMonitoring::TDynamicCounters::TCounterPtr registrations,
         NMonitoring::THistogramPtr latenciesMs)
-        : DurationSeconds(durationSeconds)
-        , IcPort(icPort)
+        : IcPort(icPort)
+        , NodeBrokerAddresses(nodeBrokerAddresses)
+        , IntervalSeconds(intervalSeconds)
+        , MaxNodes(maxNodes)
+        , FixNodeId(fixNodeId)
         , Registrations(registrations)
         , LatenciesMs(latenciesMs)
         , Client(NConfig::MakeDefaultNodeBrokerClient())
         , Env(NConfig::MakeDefaultEnv())
         , Logger(NConfig::MakeNoopInitLogger())
     {
-        Y_ASSERT(DurationSeconds > DelayBeforeMeasurements.Seconds());
-
         GrpcSettings.PathToGrpcCaFile = AppData()->GrpcConfig.GetPathToCaFile();
         GrpcSettings.PathToGrpcCertFile = AppData()->GrpcConfig.GetPathToCertificateFile();
         GrpcSettings.PathToGrpcPrivateKeyFile = AppData()->GrpcConfig.GetPathToPrivateKeyFile();
 
-        NodeBrokerAddrs = {
-            "vla5-2583.search.yandex.net:2135",
-            "vla5-2585.search.yandex.net:2135",
-            "vla5-2594.search.yandex.net:2135",
-            "vla5-2584.search.yandex.net:2135",
-            "vla5-2586.search.yandex.net:2135",
-            "vla5-2592.search.yandex.net:2135"
-        };
-
+        HostName = Env->FQDNHostName();
         Settings = {
             AppData()->DomainsConfig.GetDomain(0).GetName(),
-            Env->FQDNHostName(),
+            HostName,
             "",
             "",
             AppData()->TenantName,
-            false,
+            FixNodeId,
             IcPort,
             {},
             "root@builtin",
@@ -62,32 +60,37 @@ public:
 
     void Bootstrap(const TActorContext& ctx) {
         Become(&TRegisterNodeLoadWorkerActor::StateMain);
-        ctx.Schedule(TDuration::Seconds(DurationSeconds), new TEvents::TEvPoisonPill);
-        SendRegistrationQuery();
+        SendRegistrationQuery(ctx);
     }
 
     STRICT_STFUNC(StateMain,
         cFunc(TEvents::TSystem::PoisonPill, HandlePoisonPill)
-        cFunc(TEvents::TSystem::Wakeup, HandleWakeup)
+        CFunc(TEvents::TSystem::Wakeup, HandleWakeup)
     )
 
-    void SendRegistrationQuery() {
-        ShuffleRange(NodeBrokerAddrs);
-        auto settings = Settings;
-        settings.NodeHost = Settings.NodeHost + ToString(SelfId().NodeId()) + ToString(Offset);
-        Offset++;
+    void SendRegistrationQuery(const TActorContext& ctx) {
+        if (MaxNodes.has_value()) {
+            if (*MaxNodes == 0) {
+                return PassAway();
+            } else {
+                --*MaxNodes;
+            }
+        }
+
+        ShuffleRange(NodeBrokerAddresses);
+        Settings.NodeHost = HostName + ToString(SelfId().NodeId()) + "/" + ToString(ctx.Monotonic().GetValue());
 
         Registrations->Inc();
         THPTimer timer;
-        auto result = Client->RegisterDynamicNode(GrpcSettings, NodeBrokerAddrs, settings, *Env, *Logger);
-        // TODO(pixcc): no Apply that can be costly
+        auto result = Client->RegisterDynamicNode(GrpcSettings, NodeBrokerAddresses, Settings, *Env, *Logger);
+
         TDuration passed = TDuration::Seconds(timer.Passed());
         LatenciesMs->Collect(passed.MilliSeconds());
-        Schedule(TDuration::Seconds(45), new TEvents::TEvWakeup);
+        Schedule(IntervalSeconds, new TEvents::TEvWakeup);
     }
 
-    void HandleWakeup() {
-        SendRegistrationQuery();
+    void HandleWakeup(const TActorContext& ctx) {
+        SendRegistrationQuery(ctx);
     }
 
     private:
@@ -96,9 +99,13 @@ public:
         }
 
         // common
-        ui32 DurationSeconds;
-        ui64 Offset = 0;
         ui32 IcPort;
+
+        TVector<TString> NodeBrokerAddresses;
+        TDuration IntervalSeconds;
+        std::optional<ui64> MaxNodes;
+        bool FixNodeId;
+        TString HostName;
 
         // Monitoring
         NMonitoring::TDynamicCounters::TCounterPtr Registrations;
@@ -110,7 +117,6 @@ public:
 
         NConfig::TNodeRegistrationSettings Settings;
         NConfig::TGrpcSslSettings GrpcSettings;
-        TVector<TString> NodeBrokerAddrs;
 };
 
 class TRegisterNodeLoadActor : public TActorBootstrapped<TRegisterNodeLoadActor> {
@@ -136,7 +142,17 @@ public:
         DurationSeconds = cmd.GetDurationSeconds();
         Offset = cmd.GetIcPortOffset();
 
-        Y_ASSERT(DurationSeconds > DelayBeforeMeasurements.Seconds());
+        WorkersNum = cmd.GetWorkersNum();
+        IntervalSeconds = TDuration::Seconds(cmd.GetIntervalSeconds());
+        if (cmd.HasMaxNodes()) {
+            MaxNodes = cmd.GetMaxNodes();
+        }
+
+        FixNodeId = cmd.GetFixNodeId();
+
+        for (const auto& addr : cmd.GetNodeBrokerAddresses()) {
+            NodeBrokerAddresses.push_back(addr);
+        }
 
         // Monitoring initialization
 
@@ -160,8 +176,22 @@ public:
         ctx.Schedule(TDuration::Seconds(DurationSeconds), new TEvents::TEvPoisonPill);
         TestStartTime = TAppData::TimeProvider->Now();
 
-        for (size_t i = 0; i < 10; ++i) {
-            Workers.push_back(Register(new TRegisterNodeLoadWorkerActor(DurationSeconds, i, Registrations, LatenciesMs)));
+        for (size_t i = 0; i < WorkersNum; ++i) {
+            std::optional<ui64> maxNodes;
+
+            if (MaxNodes.has_value()) {
+                maxNodes = *MaxNodes / WorkersNum;
+
+                if (i + 1 == WorkersNum) {
+                    *maxNodes += *MaxNodes % WorkersNum;
+                }
+            }
+
+            Workers.push_back(
+                Register(
+                    new TRegisterNodeLoadWorkerActor(
+                        i, NodeBrokerAddresses, IntervalSeconds, maxNodes, FixNodeId,
+                        Registrations, LatenciesMs)));
         }
     }
 
@@ -306,6 +336,12 @@ private:
     ui64 Tag;
     ui32 DurationSeconds;
     ui64 Offset;
+
+    ui64 WorkersNum;
+    TVector<TString> NodeBrokerAddresses;
+    TDuration IntervalSeconds;
+    std::optional<ui64> MaxNodes;
+    bool FixNodeId;
 
     // Monitoring
     TString Error;

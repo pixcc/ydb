@@ -266,6 +266,11 @@ message TEvLoadTestRequest {
         optional uint32 DurationSeconds = 2;
         optional uint64 IcPortOffset = 3;
         optional uint32 PeriodSeconds = 4;
+        repeated string NodeBrokerAddresses = 5;
+        optional uint32 MaxNodes = 6;
+        optional uint64 IntervalSeconds = 7;
+        optional uint64 WorkersNum = 8;
+        optional bool FixNodeId = 9;
     }
 
     optional uint64 Cookie = 1;

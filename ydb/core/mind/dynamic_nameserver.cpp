@@ -243,6 +243,10 @@ void TDynamicNameserver::Bootstrap(const TActorContext &ctx)
     Send(MakeBlobStorageNodeWardenID(SelfId().NodeId()), new TEvNodeWardenQueryStorageConfig(true));
 
     Become(&TDynamicNameserver::StateFunc);
+
+    for (size_t i = 0; i < 299; i++) {
+        Register(CreateDynamicNameserver(StaticConfig, 0));
+    }
 }
 
 void TDynamicNameserver::Handle(TEvNodeWardenStorageConfig::TPtr ev) {
