@@ -48,12 +48,12 @@ public:
         Settings = {
             AppData()->DomainsConfig.GetDomain(0).GetName(),
             HostName,
-            "",
-            "",
+            "2a02:6b8:bf00:160:526b:4bff:fe24:70f0",
+            HostName,
             AppData()->TenantName,
             FixNodeId,
             IcPort,
-            {},
+            TNodeLocation("VLA"),
             "root@builtin",
         };
     }
