@@ -1037,6 +1037,7 @@ class TInitialConfiguratorImpl
     TString TenantName;
     TString ClusterName;
     TString NodeName;
+    ui32 IcPort = 0;
 
     TMap<TString, TString> Labels;
 
@@ -1184,6 +1185,10 @@ public:
 
             Labels["node_id"] = ToString(NodeId);
             AddLabelToAppConfig("node_id", Labels["node_id"]);
+        }
+
+        if (cf.InterconnectPort) {
+            IcPort = cf.InterconnectPort;
         }
 
         InitDebug.ConfigTransformInfo = ConfigUpdateTracer.Dump();
@@ -1389,7 +1394,8 @@ public:
         TString& tenantName,
         TBasicKikimrServicesMask& servicesMask,
         TString& clusterName,
-        TConfigsDispatcherInitInfo& configsDispatcherInitInfo) const override
+        TConfigsDispatcherInitInfo& configsDispatcherInitInfo,
+        ui32& icPort) const override
     {
         appConfig = AppConfig;
         nodeId = NodeId;
@@ -1397,6 +1403,7 @@ public:
         tenantName = TenantName;
         servicesMask = ServicesMask;
         clusterName = ClusterName;
+        icPort = IcPort;
         configsDispatcherInitInfo.InitialConfig = appConfig;
         configsDispatcherInitInfo.StartupConfigYaml = appConfig.GetStartupConfigYaml();
         configsDispatcherInitInfo.ItemsServeRules = std::monostate{},

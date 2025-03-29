@@ -896,6 +896,7 @@ try {
     TString tenantName;
     TBasicKikimrServicesMask servicesMask;
     TString clusterName;
+    ui32 icPort;
     NConfig::TConfigsDispatcherInitInfo configsDispatcherInitInfo;
 
     initCfg.Apply(
@@ -905,7 +906,8 @@ try {
         tenantName,
         servicesMask,
         clusterName,
-        configsDispatcherInitInfo);
+        configsDispatcherInitInfo,
+        icPort);
 
     CandidateStartupConfig = appConfig;
     StartupConfigProcessError = false;

@@ -22,14 +22,14 @@ public:
         return NKikimrServices::TActivity::KQP_TEST_WORKLOAD;
     }
 
-    TRegisterNodeLoadWorkerActor(ui64 icPort,
+    TRegisterNodeLoadWorkerActor(ui64 workerId,
         const TVector<TString>& nodeBrokerAddresses,
         TDuration intervalSeconds,
         std::optional<ui64> maxNodes,
         bool fixNodeId,
         NMonitoring::TDynamicCounters::TCounterPtr registrations,
         NMonitoring::THistogramPtr latenciesMs)
-        : IcPort(icPort)
+        : WorkerId(workerId)
         , NodeBrokerAddresses(nodeBrokerAddresses)
         , IntervalSeconds(intervalSeconds)
         , MaxNodes(maxNodes)
@@ -47,12 +47,12 @@ public:
         HostName = Env->FQDNHostName();
         Settings = {
             AppData()->DomainsConfig.GetDomain(0).GetName(),
-            HostName,
+            "",
             "2a02:6b8:bf00:160:526b:4bff:fe24:70f0",
-            HostName,
+            "",
             AppData()->TenantName,
             FixNodeId,
-            IcPort,
+            AppData()->IcPort,
             TNodeLocation("VLA"),
             "root@builtin",
         };
@@ -78,7 +78,10 @@ public:
         }
 
         ShuffleRange(NodeBrokerAddresses);
-        Settings.NodeHost = HostName + ToString(SelfId().NodeId()) + "/" + ToString(ctx.Monotonic().GetValue());
+        Settings.NodeHost = HostName
+            + "/" + ToString(SelfId().NodeId())
+            + "/" + WorkerId
+            + "/" + ToString(ctx.Monotonic().GetValue());
 
         Registrations->Inc();
         THPTimer timer;
@@ -99,7 +102,7 @@ public:
         }
 
         // common
-        ui32 IcPort;
+        ui32 WorkerId;
 
         TVector<TString> NodeBrokerAddresses;
         TDuration IntervalSeconds;

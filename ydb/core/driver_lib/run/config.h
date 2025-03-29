@@ -23,6 +23,7 @@ struct TKikimrRunConfig {
 
     TString TenantName;
     TBasicKikimrServicesMask ServicesMask;
+    ui32 IcPort;
 
     TString ClusterName;
 

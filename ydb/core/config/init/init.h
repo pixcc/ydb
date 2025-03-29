@@ -250,7 +250,8 @@ public:
         TString& tenantName,
         TBasicKikimrServicesMask& servicesMask,
         TString& clusterName,
-        NConfig::TConfigsDispatcherInitInfo& configsDispatcherInitInfo) const = 0;
+        NConfig::TConfigsDispatcherInitInfo& configsDispatcherInitInfo,
+        ui32& icPort) const = 0;
 };
 
 std::unique_ptr<IConfigUpdateTracer> MakeDefaultConfigUpdateTracer();
@@ -307,7 +308,8 @@ public:
         TString& tenantName,
         TBasicKikimrServicesMask& servicesMask,
         TString& clusterName,
-        TConfigsDispatcherInitInfo& configsDispatcherInitInfo) const
+        TConfigsDispatcherInitInfo& configsDispatcherInitInfo,
+        ui32& icPort) const
     {
         Impl->Apply(
             appConfig,
@@ -316,7 +318,8 @@ public:
             tenantName,
             servicesMask,
             clusterName,
-            configsDispatcherInitInfo);
+            configsDispatcherInitInfo,
+            icPort);
     }
 
 private:

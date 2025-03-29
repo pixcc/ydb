@@ -272,6 +272,7 @@ struct TAppData {
 
     TString TenantName;
     TString NodeName;
+    ui32 IcPort;
 
     TIntrusivePtr<TResourceProfiles> ResourceProfiles;
 

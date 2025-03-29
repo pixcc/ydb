@@ -49,6 +49,7 @@ NKikimrConfig::TAppConfig TransformConfig(const std::vector<TString>& args) {
     TString tenantName;
     TBasicKikimrServicesMask servicesMask;
     TString clusterName;
+    ui32 icPort;
     NConfig::TConfigsDispatcherInitInfo configsDispatcherInitInfo;
 
     initCfg->Apply(
@@ -58,7 +59,8 @@ NKikimrConfig::TAppConfig TransformConfig(const std::vector<TString>& args) {
         tenantName,
         servicesMask,
         clusterName,
-        configsDispatcherInitInfo);
+        configsDispatcherInitInfo,
+        icPort);
 
     return appConfig;
 }

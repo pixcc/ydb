@@ -35,7 +35,8 @@ int TClientCommandServer::Run(TConfig& config) {
         RunConfig.TenantName,
         RunConfig.ServicesMask,
         RunConfig.ClusterName,
-        RunConfig.ConfigsDispatcherInitInfo);
+        RunConfig.ConfigsDispatcherInitInfo,
+        RunConfig.IcPort);
 
     RunConfig.ConfigsDispatcherInitInfo.RecordedInitialConfiguratorDeps =
         std::make_shared<NConfig::TRecordedInitialConfiguratorDeps>(DepsRecorder->GetRecordedDeps());

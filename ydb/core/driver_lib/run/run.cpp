@@ -1209,6 +1209,7 @@ void TKikimrRunner::InitializeAppData(const TKikimrRunConfig& runConfig)
     }
 
     AppData->TenantName = runConfig.TenantName;
+    AppData->IcPort = runConfig.IcPort;
 
     if (runConfig.AppConfig.GetDynamicNodeConfig().GetNodeInfo().HasName()) {
         AppData->NodeName = runConfig.AppConfig.GetDynamicNodeConfig().GetNodeInfo().GetName();
