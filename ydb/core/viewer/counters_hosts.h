@@ -35,9 +35,10 @@ public:
     {}
 
     void Bootstrap() {
-        const auto& params(Event->Get()->Request.GetParams());
-        StaticNodesOnly = FromStringWithDefault<bool>(params.Get("static_only"), StaticNodesOnly);
-        DynamicNodesOnly = FromStringWithDefault<bool>(params.Get("dynamic_only"), DynamicNodesOnly);
+        //const auto& params(Event->Get()->Request.GetParams());
+        //StaticNodesOnly = FromStringWithDefault<bool>(params.Get("static_only"), StaticNodesOnly);
+        //DynamicNodesOnly = FromStringWithDefault<bool>(params.Get("dynamic_only"), DynamicNodesOnly);
+        StaticNodesOnly = true;
         const TActorId nameserviceId = GetNameserviceActorId();
         Send(nameserviceId, new TEvInterconnect::TEvListNodes());
         Schedule(TDuration::Seconds(10), new TEvents::TEvWakeup());

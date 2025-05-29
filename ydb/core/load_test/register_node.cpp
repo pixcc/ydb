@@ -68,7 +68,7 @@ public:
         CFunc(TEvents::TSystem::Wakeup, HandleWakeup)
     )
 
-    void SendRegistrationQuery(const TActorContext& ctx) {
+    void SendRegistrationQuery(const TActorContext&) {
         if (MaxNodes.has_value()) {
             if (*MaxNodes == 0) {
                 return PassAway();
@@ -80,8 +80,8 @@ public:
         ShuffleRange(NodeBrokerAddresses);
         Settings.NodeHost = HostName
             + "/" + ToString(SelfId().NodeId())
-            + "/" + WorkerId
-            + "/" + ToString(ctx.Monotonic().GetValue());
+            + "/" + WorkerId;
+            //+ "/" + ToString(ctx.Monotonic().GetValue());
 
         Registrations->Inc();
         THPTimer timer;

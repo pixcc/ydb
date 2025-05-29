@@ -115,7 +115,7 @@ public:
 
         Scheduler = std::make_shared<TComputeScheduler>();
         SchedulerOptions.Scheduler = Scheduler;
-        SchedulerActorId = RegisterWithSameMailbox(CreateSchedulerActor(SchedulerOptions));
+        //SchedulerActorId = RegisterWithSameMailbox(CreateSchedulerActor(SchedulerOptions));
     }
 
 private:

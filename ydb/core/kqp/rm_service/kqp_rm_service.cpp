@@ -181,7 +181,7 @@ public:
             config.GetKqpPatternCacheCompiledCapacityBytes(),
             config.GetKqpPatternCachePatternAccessTimesBeforeTryToCompile());
 
-        CreateResourceInfoExchanger(config.GetInfoExchangerSettings());
+        //CreateResourceInfoExchanger(config.GetInfoExchangerSettings());
 
         if (PublishAfterBootstrap.test()) {
             FireResourcesPublishing();
@@ -879,59 +879,59 @@ private:
         return TStringBuilder() << "kqprm+" << database;
     }
 
-    void PublishResourceUsage(TStringBuf reason) {
-        const TDuration publishInterval = TDuration::Seconds(Config.GetPublishStatisticsIntervalSec());
-        if (PublishResourcesScheduledAt) {
-            return;
-        }
+    void PublishResourceUsage(TStringBuf) {
+        // const TDuration publishInterval = TDuration::Seconds(Config.GetPublishStatisticsIntervalSec());
+        // if (PublishResourcesScheduledAt) {
+        //     return;
+        // }
 
-        auto now = ResourceManager->ActorSystem->Timestamp();
-        if (publishInterval && WbState.LastPublishTime && now - *WbState.LastPublishTime < publishInterval) {
-            PublishResourcesScheduledAt = *WbState.LastPublishTime + publishInterval;
+        // auto now = ResourceManager->ActorSystem->Timestamp();
+        // if (publishInterval && WbState.LastPublishTime && now - *WbState.LastPublishTime < publishInterval) {
+        //     PublishResourcesScheduledAt = *WbState.LastPublishTime + publishInterval;
 
-            Schedule(*PublishResourcesScheduledAt - now, new TEvPrivate::TEvPublishResources);
-            LOG_D("Schedule publish at " << *PublishResourcesScheduledAt << ", after " << (*PublishResourcesScheduledAt - now));
-            return;
-        }
+        //     Schedule(*PublishResourcesScheduledAt - now, new TEvPrivate::TEvPublishResources);
+        //     LOG_D("Schedule publish at " << *PublishResourcesScheduledAt << ", after " << (*PublishResourcesScheduledAt - now));
+        //     return;
+        // }
 
-        // starting resources publishing.
-        // saying resource manager that we are ready for the next publishing.
-        ResourceManager->PublishScheduled.clear();
+        // // starting resources publishing.
+        // // saying resource manager that we are ready for the next publishing.
+        // ResourceManager->PublishScheduled.clear();
 
-        NKikimrKqp::TKqpNodeResources payload;
-        payload.SetNodeId(SelfId().NodeId());
-        payload.SetTimestamp(now.Seconds());
-        if (KqpProxySharedResources) {
-            if (SelfDataCenterId) {
-                auto* proxyNodeResources = payload.MutableKqpProxyNodeResources();
-                ProxyNodeResources.SetActiveWorkersCount(KqpProxySharedResources->AtomicLocalSessionCount.load());
-                if (SelfDataCenterId) {
-                    *proxyNodeResources = ProxyNodeResources;
-                }
-            }
-        } else {
-            LOG_D("Don't set KqpProxySharedResources");
-        }
-        ActorIdToProto(MakeKqpResourceManagerServiceID(SelfId().NodeId()), payload.MutableResourceManagerActorId()); // legacy
-        with_lock (ResourceManager->Lock) {
-            payload.SetAvailableComputeActors(ResourceManager->ExecutionUnitsResource.load()); // legacy
-            payload.SetTotalMemory(ResourceManager->TotalMemoryResource->GetLimit()); // legacy
-            payload.SetUsedMemory(ResourceManager->TotalMemoryResource->GetLimit() - ResourceManager->TotalMemoryResource->Available()); // legacy
+        // NKikimrKqp::TKqpNodeResources payload;
+        // payload.SetNodeId(SelfId().NodeId());
+        // payload.SetTimestamp(now.Seconds());
+        // if (KqpProxySharedResources) {
+        //     if (SelfDataCenterId) {
+        //         auto* proxyNodeResources = payload.MutableKqpProxyNodeResources();
+        //         ProxyNodeResources.SetActiveWorkersCount(KqpProxySharedResources->AtomicLocalSessionCount.load());
+        //         if (SelfDataCenterId) {
+        //             *proxyNodeResources = ProxyNodeResources;
+        //         }
+        //     }
+        // } else {
+        //     LOG_D("Don't set KqpProxySharedResources");
+        // }
+        // ActorIdToProto(MakeKqpResourceManagerServiceID(SelfId().NodeId()), payload.MutableResourceManagerActorId()); // legacy
+        // with_lock (ResourceManager->Lock) {
+        //     payload.SetAvailableComputeActors(ResourceManager->ExecutionUnitsResource.load()); // legacy
+        //     payload.SetTotalMemory(ResourceManager->TotalMemoryResource->GetLimit()); // legacy
+        //     payload.SetUsedMemory(ResourceManager->TotalMemoryResource->GetLimit() - ResourceManager->TotalMemoryResource->Available()); // legacy
 
-            payload.SetExecutionUnits(ResourceManager->ExecutionUnitsResource.load());
-            auto* pool = payload.MutableMemory()->Add();
-            pool->SetPool(EKqpMemoryPool::ScanQuery);
-            pool->SetAvailable(ResourceManager->TotalMemoryResource->Available());
-        }
+        //     payload.SetExecutionUnits(ResourceManager->ExecutionUnitsResource.load());
+        //     auto* pool = payload.MutableMemory()->Add();
+        //     pool->SetPool(EKqpMemoryPool::ScanQuery);
+        //     pool->SetAvailable(ResourceManager->TotalMemoryResource->Available());
+        // }
 
-        LOG_I("Send to publish resource usage for "
-            << "reason: " << reason
-            << ", payload: " << payload.ShortDebugString());
-        WbState.LastPublishTime = now;
-        if (ResourceManager->ResourceInfoExchanger) {
-            Send(ResourceManager->ResourceInfoExchanger,
-                new TEvKqpResourceInfoExchanger::TEvPublishResource(std::move(payload)));
-        }
+        // LOG_I("Send to publish resource usage for "
+        //     << "reason: " << reason
+        //     << ", payload: " << payload.ShortDebugString());
+        // WbState.LastPublishTime = now;
+        // if (ResourceManager->ResourceInfoExchanger) {
+        //     Send(ResourceManager->ResourceInfoExchanger,
+        //         new TEvKqpResourceInfoExchanger::TEvPublishResource(std::move(payload)));
+        // }
     }
 
 private:
