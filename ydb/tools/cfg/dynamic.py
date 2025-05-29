@@ -48,12 +48,33 @@ class DynamicConfigGenerator(object):
                 self._binary_path,
                 "-s",
                 self.grpc_endpoint,
+                "-f",
+                os.path.join(self._output_dir, "token-file"),
                 "admin",
                 "bs",
                 "config",
                 "invoke",
                 "--proto-file",
                 os.path.join(self._output_dir, proto_file),
+            ]
+        )
+
+    def __init_token_command(self):
+        return " ".join(
+            [
+                "/home/pixcc/ydbwork/ydb/ydb/apps/ydb/ydb",
+                "-e",
+                self.grpc_endpoint,
+                "-d",
+                "/Root",
+                "--user",
+                "root",
+                "--no-password",
+                "auth",
+                "get-token",
+                "--force",
+                ">",
+                os.path.join(self._output_dir, "token-file"),
             ]
         )
 
@@ -113,6 +134,8 @@ class DynamicConfigGenerator(object):
             [
                 self._binary_path,
                 "--server=%s" % self.grpc_endpoint,
+                "-f",
+                os.path.join(self._output_dir, "token-file"),
                 "db",
                 "schema",
                 "execute",
@@ -126,6 +149,8 @@ class DynamicConfigGenerator(object):
                 self._binary_path,
                 "-s",
                 self.grpc_endpoint,
+                "-f",
+                os.path.join(self._output_dir, "token-file"),
                 "admin",
                 "console",
                 "execute",
@@ -153,6 +178,14 @@ class DynamicConfigGenerator(object):
             [
                 "set -eu",
                 self.__init_storage_command("DefineBoxAndStoragePools.txt"),
+            ]
+        )
+    
+    def init_token_commands(self):
+        return '\n'.join(
+            [
+                "set -eu",
+                self.__init_token_command(),
             ]
         )
 
@@ -357,6 +390,7 @@ class DynamicConfigGenerator(object):
                 'init_compute.bash': self.init_compute_commands(),
                 'init_storage.bash': self.init_storage_commands(),
                 'init_root_storage.bash': self.init_root_storage(),
+                'init_token.bash': self.init_token_commands(),
             }
         )
         for domain in self._cluster_details.domains:

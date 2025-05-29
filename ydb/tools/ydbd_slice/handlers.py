@@ -98,6 +98,7 @@ class Slice:
         time_remaining = 120
         while True:
             try:
+                self._invoke_scripts(dynamic_cfg_path, ['init_token.bash'])
                 self._invoke_scripts(dynamic_cfg_path, ['init_storage.bash'])
                 break
             except CalledProcessError:
