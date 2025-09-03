@@ -428,6 +428,8 @@ enum EServiceKikimr {
     NAMESERVICE = 3300;
 
     BRIDGE = 3400;
+
+    LOCAL_DB_BACKUP = 3500;
 };
 
 message TActivity {

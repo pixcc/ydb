@@ -508,6 +508,8 @@ class TExecutor
     TControlWrapper LogFlushDelayOverrideUsec;
     TControlWrapper MaxCommitRedoMB;
 
+    TActorId BackupWriter;
+
     ui64 Stamp() const noexcept;
     void Registered(TActorSystem*, const TActorId&) override;
     void PassAway() override;
@@ -551,6 +553,7 @@ class TExecutor
     void AddSingleCache(const TIntrusivePtr<TPrivatePageCache::TInfo> &info);
     void DropCachesOfBundle(const NTable::TPart &part);
     void DropSingleCache(const TLogoBlobID&);
+    void StartBackup();
 
     void TranslateCacheTouchesToSharedCache();
     void RequestInMemPagesForDatabase(bool pendingOnly = false);

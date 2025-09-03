@@ -1298,6 +1298,10 @@ void TKikimrRunner::InitializeAppData(const TKikimrRunConfig& runConfig)
         AppData->BridgeModeEnabled = true;
     }
 
+    if (runConfig.AppConfig.HasSystemTabletBackupConfig()) {
+        AppData->SystemTabletBackupConfig = runConfig.AppConfig.GetSystemTabletBackupConfig();
+    }
+
     // setup resource profiles
     AppData->ResourceProfiles = new TResourceProfiles;
     if (runConfig.AppConfig.GetBootstrapConfig().ResourceProfilesSize())
