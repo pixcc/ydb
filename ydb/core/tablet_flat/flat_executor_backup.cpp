@@ -9,12 +9,13 @@
 
 namespace NKikimr::NTabletFlatExecutor {
 
-class TBackupWriter : public TActorBootstrapped<TBackupWriter> {
+class TFileSystemWriter : public TActorBootstrapped<TFileSystemWriter> {
 public:
-    using TBase = TActorBootstrapped<TBackupWriter>;
+    using TBase = TActorBootstrapped<TFileSystemWriter>;
 
     void Bootstrap() {
         LOG_D("Bootstrap");
+        Become(&TThis::StateWork);
     }
 
     void PassAway() override {
@@ -29,8 +30,12 @@ public:
     }
 };
 
-IActor* CreateBackupWriter() {
-    return new TBackupWriter();
+IActor* CreateBackupWriter(const NKikimrConfig::TSystemTabletBackupConfig& config, TTabletTypes::EType, ui64, ui32) {
+    if (config.HasFilesystem()) {
+        return new TFileSystemWriter();
+    } else {
+        return nullptr;
+    }
 }
 
 } // NKikimr::NTabletFlatExecutor
