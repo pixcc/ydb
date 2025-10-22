@@ -386,7 +386,7 @@ private:
     bool RemoveNotification(const TString &id, const TString &user, bool remove, TErrorInfo &error);
 
     template<typename TEvRequestPtr>
-    bool CheckEnabled(TEvRequestPtr &ev, const TActorContext &ctx) {
+    bool CheckEnabled(TEvRequestPtr &ev, const TActorContext &ctx) const {
         if (!State->Config.Enable) {
             ReplyWithError<TEvCms::TEvPermissionResponse>(ev, NKikimrCms::TStatus::ERROR_TEMP, "CMS is disabled", ctx);
         }
