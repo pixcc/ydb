@@ -1546,13 +1546,21 @@ void TCms::StartCollecting()
     Register(collector);
 }
 
+template<typename TEvRequestPtr>
+bool TCms::CheckEnabled(TEvRequestPtr &ev, const TActorContext &ctx)
+{
+    if (!State->Config.Enable) {
+        ReplyWithError<TEvCms::TEvPermissionResponse>(ev, TStatus::ERROR_TEMP, "CMS is disabled", ctx);
+    }
+    return State->Config.Enable;
+}
+
 void TCms::CheckAndEnqueueRequest(TEvCms::TEvPermissionRequest::TPtr &ev, const TActorContext &ctx)
 {
     auto &rec = ev->Get()->Record;
 
-    if (!State->Config.Enable) {
-        return ReplyWithError<TEvCms::TEvPermissionResponse>(
-            ev, TStatus::ERROR_TEMP, "CMS is disabled", ctx);
+    if (!CheckEnabled(ev, ctx)) {
+        return;
     }
 
     if (!rec.GetUser()) {
@@ -1595,9 +1603,8 @@ void TCms::CheckAndEnqueueRequest(TEvCms::TEvCheckRequest::TPtr &ev, const TActo
 {
     auto &rec = ev->Get()->Record;
 
-    if (!State->Config.Enable) {
-        return ReplyWithError<TEvCms::TEvPermissionResponse>(
-            ev, TStatus::ERROR_TEMP, "CMS is disabled", ctx);
+    if (!CheckEnabled(ev, ctx)) {
+        return;
     }
 
     if (!rec.GetUser()) {
@@ -1621,9 +1628,8 @@ void TCms::CheckAndEnqueueRequest(TEvCms::TEvCheckRequest::TPtr &ev, const TActo
 
 void TCms::CheckAndEnqueueRequest(TEvCms::TEvConditionalPermissionRequest::TPtr &ev, const TActorContext &ctx)
 {
-    if (!State->Config.Enable) {
-        return ReplyWithError<TEvCms::TEvPermissionResponse>(
-            ev, TStatus::ERROR_TEMP, "CMS is disabled", ctx);
+    if (!CheckEnabled(ev, ctx)) {
+        return;
     }
 
     ReplyWithError<TEvCms::TEvPermissionResponse>(ev, TStatus::ERROR, "Not supported", ctx);
@@ -1633,9 +1639,8 @@ void TCms::CheckAndEnqueueRequest(TEvCms::TEvNotification::TPtr &ev, const TActo
 {
     auto &rec = ev->Get()->Record;
 
-    if (!State->Config.Enable) {
-        return ReplyWithError<TEvCms::TEvPermissionResponse>(
-            ev, TStatus::ERROR_TEMP, "CMS is disabled", ctx);
+    if (!CheckEnabled(ev, ctx)) {
+        return;
     }
 
     if (!rec.GetUser()) {
