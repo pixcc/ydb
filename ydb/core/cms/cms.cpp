@@ -1550,10 +1550,6 @@ void TCms::CheckAndEnqueueRequest(TEvCms::TEvPermissionRequest::TPtr &ev, const 
 {
     auto &rec = ev->Get()->Record;
 
-    if (!CheckEnabled(ev, ctx)) {
-        return;
-    }
-
     if (!rec.GetUser()) {
         return ReplyWithError<TEvCms::TEvPermissionResponse>(
             ev, TStatus::WRONG_REQUEST, "Missing user in request", ctx);
@@ -1594,10 +1590,6 @@ void TCms::CheckAndEnqueueRequest(TEvCms::TEvCheckRequest::TPtr &ev, const TActo
 {
     auto &rec = ev->Get()->Record;
 
-    if (!CheckEnabled(ev, ctx)) {
-        return;
-    }
-
     if (!rec.GetUser()) {
         return ReplyWithError<TEvCms::TEvPermissionResponse>(
             ev, TStatus::WRONG_REQUEST, "Missing user in request", ctx);
@@ -1619,20 +1611,12 @@ void TCms::CheckAndEnqueueRequest(TEvCms::TEvCheckRequest::TPtr &ev, const TActo
 
 void TCms::CheckAndEnqueueRequest(TEvCms::TEvConditionalPermissionRequest::TPtr &ev, const TActorContext &ctx)
 {
-    if (!CheckEnabled(ev, ctx)) {
-        return;
-    }
-
     ReplyWithError<TEvCms::TEvPermissionResponse>(ev, TStatus::ERROR, "Not supported", ctx);
 }
 
 void TCms::CheckAndEnqueueRequest(TEvCms::TEvNotification::TPtr &ev, const TActorContext &ctx)
 {
     auto &rec = ev->Get()->Record;
-
-    if (!CheckEnabled(ev, ctx)) {
-        return;
-    }
 
     if (!rec.GetUser()) {
         return ReplyWithError<TEvCms::TEvNotificationResponse>(
