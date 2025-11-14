@@ -43,11 +43,14 @@ namespace NSentinel {
 
 /// TPDiskStatusComputer
 
-TPDiskStatusComputer::TPDiskStatusComputer(const ui32& defaultStateLimit, const ui32& goodStateLimit, const TLimitsMap& stateLimits)
+TPDiskStatusComputer::TPDiskStatusComputer(const ui32& defaultStateLimit, const ui32& goodStateLimit, const TLimitsMap& stateLimits,
+                                           TInstant cmsFirstBootTimestamp, const TDuration& initialDeploymentGracePeriod)
     : DefaultStateLimit(defaultStateLimit)
     , GoodStateLimit(goodStateLimit)
     , StateLimits(stateLimits)
     , StateCounter(0)
+    , CMSFirstBootTimestamp(cmsFirstBootTimestamp)
+    , InitialDeploymentGracePeriod(initialDeploymentGracePeriod)
 {
 }
 
@@ -129,7 +132,11 @@ EPDiskStatus TPDiskStatusComputer::Compute(EPDiskStatus current, TString& reason
             }
         }
 
-        return EPDiskStatus::INACTIVE;
+        if (IsInitialDeploymentGracePeriod() && State == NKikimrBlobStorage::TPDiskState::Normal) {
+            return EPDiskStatus::ACTIVE;
+        } else {
+            return EPDiskStatus::INACTIVE;
+        }
     }
 
     reason = TStringBuilder()
@@ -189,16 +196,25 @@ void TPDiskStatusComputer::SetMaintenanceStatus(EMaintenanceStatus::E status) {
     MaintenanceStatus = status;
 }
 
+bool TPDiskStatusComputer::IsInitialDeploymentGracePeriod() const {
+    if (TlsActivationContext) {
+        return CMSFirstBootTimestamp + InitialDeploymentGracePeriod < TActivationContext::Now();
+    } else {
+        return false; // unsupported outside of actorsystem
+    }
+}
+
 /// TPDiskStatus
 
 TPDiskStatus::TPDiskStatus(EPDiskStatus initialStatus, const ui32& defaultStateLimit, const ui32& goodStateLimit, const TLimitsMap& stateLimits)
-    : TPDiskStatus(initialStatus, EMaintenanceStatus::NOT_SET, defaultStateLimit, goodStateLimit, stateLimits)
+    : TPDiskStatus(initialStatus, EMaintenanceStatus::NOT_SET, defaultStateLimit, goodStateLimit, stateLimits, {}, {})
 {
 }
 
 TPDiskStatus::TPDiskStatus(EPDiskStatus initialStatus, EMaintenanceStatus::E initialMaintenanceStatus,
-                           const ui32& defaultStateLimit, const ui32& goodStateLimit, const TLimitsMap& stateLimits)
-    : TPDiskStatusComputer(defaultStateLimit, goodStateLimit, stateLimits)
+                           const ui32& defaultStateLimit, const ui32& goodStateLimit, const TLimitsMap& stateLimits,
+                           TInstant cmsFirstBootTimestamp, const TDuration& initialDeploymentGracePeriod)
+    : TPDiskStatusComputer(defaultStateLimit, goodStateLimit, stateLimits, cmsFirstBootTimestamp, initialDeploymentGracePeriod)
     , Current(initialStatus)
     , CurrentMaintenanceStatus(initialMaintenanceStatus)
     , ChangingAllowed(true)
@@ -271,8 +287,10 @@ void TPDiskStatus::DisallowChanging() {
 /// TPDiskInfo
 
 TPDiskInfo::TPDiskInfo(EPDiskStatus initialStatus, EMaintenanceStatus::E initialMaintenanceStatus,
-                       const ui32& defaultStateLimit, const ui32& goodStateLimit, const TLimitsMap& stateLimits)
-    : TPDiskStatus(initialStatus, initialMaintenanceStatus, defaultStateLimit, goodStateLimit, stateLimits)
+                       const ui32& defaultStateLimit, const ui32& goodStateLimit, const TLimitsMap& stateLimits,
+                       TInstant cmsFirstBootTimestamp, const TDuration& initialDeploymentGracePeriod)
+    : TPDiskStatus(initialStatus, initialMaintenanceStatus, defaultStateLimit, goodStateLimit, stateLimits,
+                   cmsFirstBootTimestamp, initialDeploymentGracePeriod)
     , ActualStatus(initialStatus)
     , ActualMaintenanceStatus(initialMaintenanceStatus)
 {
@@ -599,7 +617,9 @@ class TConfigUpdater: public TUpdaterBase<TEvSentinel::TEvConfigUpdated, TConfig
                     continue;
                 }
 
-                pdisks.emplace(id, new TPDiskInfo(pdisk.GetDriveStatus(), pdisk.GetMaintenanceStatus(), Config.DefaultStateLimit, Config.GoodStateLimit, Config.StateLimits));
+                pdisks.emplace(id, new TPDiskInfo(pdisk.GetDriveStatus(), pdisk.GetMaintenanceStatus(), Config.DefaultStateLimit,
+                                                  Config.GoodStateLimit, Config.StateLimits, CmsState->FirstBootTimestamp,
+                                                  Config.InitialDeploymentGracePeriod));
             }
 
             SentinelState->ConfigUpdaterState.GotBSCResponse = true;

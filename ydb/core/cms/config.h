@@ -43,6 +43,8 @@ struct TCmsSentinelConfig {
 
     EEvictVDisksStatus EvictVDisksStatus;
 
+    TDuration InitialDeploymentGracePeriod;
+
     void Serialize(NKikimrCms::TCmsConfig::TSentinelConfig &config) const {
         config.SetEnable(Enable);
         config.SetDryRun(DryRun);
@@ -62,6 +64,8 @@ struct TCmsSentinelConfig {
 
         SaveStateLimits(config);
         SaveEvictVDisksStatus(config);
+
+        config.SetInitialDeploymentGracePeriod(InitialDeploymentGracePeriod.GetValue());
     }
 
     void Deserialize(const NKikimrCms::TCmsConfig::TSentinelConfig &config) {
@@ -85,6 +89,8 @@ struct TCmsSentinelConfig {
         StateLimits.swap(newStateLimits);
 
         EvictVDisksStatus = LoadEvictVDisksStatus(config);
+
+        InitialDeploymentGracePeriod = TDuration::MicroSeconds(config.GetInitialDeploymentGracePeriod());
     }
 
     void SaveStateLimits(NKikimrCms::TCmsConfig::TSentinelConfig &config) const {
