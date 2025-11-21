@@ -662,10 +662,14 @@ struct Schema {
     struct NoAutoPrecharge {};
     struct AutoPrecharge {};
 
+    struct NoBackup;
+    struct InBackup;
+
     template <TTableId _TableId> struct Table {
         constexpr static TTableId TableId = _TableId;
 
         using Precharge = AutoPrecharge;
+        using BackupPolicy = InBackup;
 
         template <TColumnId _ColumnId, NScheme::TTypeId _ColumnType, bool _IsNotNull = false>
         struct Column {
@@ -2094,6 +2098,8 @@ struct Schema {
             }
 
             database.Alter().AddTable(GetTableName(TypeName<Type>()), Type::TableId);
+            database.Alter().SetNoBackup(Type::TableId, std::is_same_v<typename Type::BackupPolicy, NoBackup>);
+
             Type::TColumns::Materialize(database);
             Type::TKey::Materialize(database);
         }

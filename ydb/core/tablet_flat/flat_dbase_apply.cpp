@@ -162,6 +162,11 @@ bool TSchemeModifier::Apply(const TAlterRecord &delta)
             changes |= ChangeTableSetting(table, tableInfo.ColdBorrow, enabled);
         }
 
+        if (delta.HasNoBackup()) {
+            bool noBackup = delta.GetNoBackup();
+            changes |= ChangeTableSetting(table, tableInfo.NoBackup, noBackup);
+        }
+
     } else if (action == TAlterRecord::UpdateExecutorInfo) {
         if (delta.HasExecutorCacheSize())
             changes |= SetExecutorCacheSize(delta.GetExecutorCacheSize());
