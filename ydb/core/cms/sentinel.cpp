@@ -198,7 +198,7 @@ void TPDiskStatusComputer::SetMaintenanceStatus(EMaintenanceStatus::E status) {
 
 bool TPDiskStatusComputer::IsInitialDeploymentGracePeriod() const {
     if (TlsActivationContext) {
-        return CMSFirstBootTimestamp + InitialDeploymentGracePeriod < TActivationContext::Now();
+        return CMSFirstBootTimestamp + InitialDeploymentGracePeriod > TActivationContext::Now();
     } else {
         return false; // unsupported outside of actorsystem
     }
