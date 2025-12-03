@@ -272,7 +272,7 @@ private:
         importInfo.Items.reserve(settings.items().size());
         for (ui32 itemIdx : xrange(settings.items().size())) {
             const TString& dstPath = settings.items(itemIdx).destination_path();
-            if (!dstPaths.insert(NBackup::NormalizeItemPath(dstPath)).second) {
+            if (!dstPaths.insert(NKikimr::NBackup::NormalizeItemPath(dstPath)).second) {
                 explain = TStringBuilder() << "Duplicate destination_path: " << dstPath;
                 return false;
             }
@@ -282,8 +282,8 @@ private:
             }
 
             auto& item = importInfo.Items.emplace_back(dstPath);
-            item.SrcPrefix = NBackup::NormalizeExportPrefix(settings.items(itemIdx).source_prefix());
-            item.SrcPath = NBackup::NormalizeItemPath(settings.items(itemIdx).source_path());
+            item.SrcPrefix = NKikimr::NBackup::NormalizeExportPrefix(settings.items(itemIdx).source_prefix());
+            item.SrcPath = NKikimr::NBackup::NormalizeItemPath(settings.items(itemIdx).source_path());
         }
 
         return true;
@@ -1085,7 +1085,7 @@ private:
         } else {
             dstRoot = CanonizePath(importInfo->Settings.destination_path());
         }
-        TString sourcePrefix = NBackup::NormalizeExportPrefix(importInfo->Settings.source_prefix());
+        TString sourcePrefix = NKikimr::NBackup::NormalizeExportPrefix(importInfo->Settings.source_prefix());
         if (sourcePrefix) {
             sourcePrefix.push_back('/');
         }
@@ -1097,8 +1097,8 @@ private:
                 return dstRoot + objectPath;
             }
         };
-        auto init = [&](const NBackup::TSchemaMapping::TItem& schemaMappingItem, NSchemeShard::TImportInfo::TItem& item) {
-            item.SrcPrefix = TStringBuilder() << sourcePrefix << NBackup::NormalizeItemPrefix(schemaMappingItem.ExportPrefix);
+        auto init = [&](const NKikimr::NBackup::TSchemaMapping::TItem& schemaMappingItem, NSchemeShard::TImportInfo::TItem& item) {
+            item.SrcPrefix = TStringBuilder() << sourcePrefix << NKikimr::NBackup::NormalizeItemPrefix(schemaMappingItem.ExportPrefix);
             item.SrcPath = schemaMappingItem.ObjectPath;
             item.ExportItemIV = schemaMappingItem.IV;
         };
@@ -1119,18 +1119,18 @@ private:
             TMapping schemaMappingObjectPathIndex;
             for (size_t i = 0; i < importInfo->SchemaMapping->Items.size(); ++i) {
                 const auto& schemaMappingItem = importInfo->SchemaMapping->Items[i];
-                schemaMappingPrefixIndex[NBackup::NormalizeItemPrefix(schemaMappingItem.ExportPrefix)] = i;
-                schemaMappingObjectPathIndex[NBackup::NormalizeItemPath(schemaMappingItem.ObjectPath)] = i;
+                schemaMappingPrefixIndex[NKikimr::NBackup::NormalizeItemPrefix(schemaMappingItem.ExportPrefix)] = i;
+                schemaMappingObjectPathIndex[NKikimr::NBackup::NormalizeItemPath(schemaMappingItem.ObjectPath)] = i;
             }
             for (auto& item : importInfo->Items) {
                 TMapping::iterator mappingIt;
                 if (item.SrcPrefix) {
-                    mappingIt = schemaMappingPrefixIndex.find(NBackup::NormalizeItemPrefix(item.SrcPrefix));
+                    mappingIt = schemaMappingPrefixIndex.find(NKikimr::NBackup::NormalizeItemPrefix(item.SrcPrefix));
                     if (mappingIt == schemaMappingPrefixIndex.end()) {
                         return CancelAndPersist(db, importInfo, -1, {}, TStringBuilder() << "cannot find prefix \"" << item.SrcPrefix << "\" in schema mapping");
                     }
                 } else if (item.SrcPath) {
-                    mappingIt = schemaMappingObjectPathIndex.find(NBackup::NormalizeItemPath(item.SrcPath));
+                    mappingIt = schemaMappingObjectPathIndex.find(NKikimr::NBackup::NormalizeItemPath(item.SrcPath));
                     if (mappingIt == schemaMappingObjectPathIndex.end()) {
                         return CancelAndPersist(db, importInfo, -1, {}, TStringBuilder() << "cannot find source path \"" << item.SrcPath << "\" in schema mapping");
                     }
