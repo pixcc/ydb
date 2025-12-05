@@ -27,6 +27,7 @@ import "ydb/core/protos/memory_controller_config.proto";
 import "ydb/core/protos/netclassifier.proto";
 import "ydb/core/protos/node_broker.proto";
 import "ydb/core/protos/pqconfig.proto";
+import "ydb/core/protos/recoveryshard_config.proto";
 import "ydb/core/protos/replication.proto";
 import "ydb/core/protos/resource_broker.proto";
 import "ydb/core/protos/shared_cache.proto";
@@ -2491,6 +2492,7 @@ message TAppConfig {
     optional TCompositeConveyorConfig CompositeConveyorConfig = 109;
     optional TGeneralCacheConfig PortionsMetadataCache = 110;
     optional TSystemTabletBackupConfig SystemTabletBackupConfig = 111;
+    optional TRecoveryShardConfig RecoveryShardConfig = 112;
 }
 
 message TYdbVersion {
