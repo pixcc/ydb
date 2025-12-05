@@ -552,7 +552,7 @@ class TExecutor
     void AddSingleCache(const TIntrusivePtr<TPrivatePageCache::TInfo> &info);
     void DropCachesOfBundle(const NTable::TPart &part);
     void DropSingleCache(const TLogoBlobID&);
-    void StartBackup();
+    void StartNewBackup();
 
     void TranslateCacheTouchesToSharedCache();
     void RequestInMemPagesForDatabase(bool pendingOnly = false);
