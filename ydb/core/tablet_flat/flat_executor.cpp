@@ -4974,8 +4974,7 @@ void TExecutor::StartNewBackup() {
         return;
     }
 
-    // Ensure that pending commits are flushed to the old backup changelog,
-    // and the step is incremented before starting a new backup
+    // Ensure that pending commits are flushed to the old backup changelog
     LogicRedo->FlushBatchedLog();
 
     TTabletTypes::EType tabletType = Owner->TabletType();
