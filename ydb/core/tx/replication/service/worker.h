@@ -92,7 +92,7 @@ struct TEvWorker {
     struct TEvTerminateWriter: public TEventLocal<TEvTerminateWriter, EvTerminateWriter> {
         ui64 PartitionId;
 
-        TEvTerminateWriter(ui64 partitionId);
+        explicit TEvTerminateWriter(ui64 partitionId);
         TString ToString() const override;
     };
 };
