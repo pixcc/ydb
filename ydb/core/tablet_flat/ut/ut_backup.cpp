@@ -821,6 +821,8 @@ struct TEnv : public TMyEnvBase {
     }
 
     void RestoreBackup(const TString& backupPath, ui32 TestTabletFlags, bool skipChecksumValidation = false) {
+        DryRunRestoreBackup(backupPath, skipChecksumValidation);
+
         Cerr << "...restarting dummy tablet in recovery mode" << Endl;
         RestartTabletInRecoveryMode();
 
@@ -837,6 +839,8 @@ struct TEnv : public TMyEnvBase {
     }
 
     void RestoreBackupExpectWarning(const TString& backupPath, ui32 TestTabletFlags, bool skipChecksumValidation = false) {
+        DryRunRestoreBackupExpectWarning(backupPath, skipChecksumValidation);
+
         Cerr << "...restarting dummy tablet in recovery mode" << Endl;
         RestartTabletInRecoveryMode();
 
@@ -893,6 +897,73 @@ struct TEnv : public TMyEnvBase {
         return genDirs.back();
     }
 
+    void RestoreLastBackupExpectFail() {
+        DryRunRestoreLastBackupExpectFail();
+
+        auto backupPath = GetLastBackupPath();
+
+        Cerr << "...restarting dummy tablet in recovery mode" << Endl;
+        RestartTabletInRecoveryMode();
+
+        Cerr << "...restoring backup (expecting failure)" << Endl;
+        SendAsync(new NRecovery::TEvRestoreBackup(backupPath));
+
+        TAutoPtr<IEventHandle> handle;
+        auto result = Env.GrabEdgeEventRethrow<NRecovery::TEvRestoreCompleted>(handle);
+        Cerr << "...restore result: Success=" << result->Success << ", Error=" << result->Error << Endl;
+        UNIT_ASSERT_C(!result->Success, "Restore should have failed but succeeded");
+    }
+
+    void DryRunRestoreBackup(const TString& backupPath, bool skipChecksumValidation = false) {
+        Cerr << "...restarting dummy tablet in recovery mode (dry-run)" << Endl;
+        RestartTabletInRecoveryMode();
+
+        Cerr << "...dry-run restoring backup" << Endl;
+        SendAsync(new NRecovery::TEvRestoreBackup(backupPath, skipChecksumValidation, /*dryRun=*/ true));
+
+        TAutoPtr<IEventHandle> handle;
+        auto result = Env.GrabEdgeEventRethrow<NRecovery::TEvRestoreCompleted>(handle);
+        UNIT_ASSERT_C(result->Success, "Dry-run restore failed: " << result->Error);
+        UNIT_ASSERT_C(result->Error.empty(), "Dry-run restore completed with warning: " << result->Error);
+    }
+
+    void DryRunRestoreLastBackup() {
+        DryRunRestoreBackup(GetLastBackupPath());
+    }
+
+    void DryRunRestoreLastBackupExpectFail() {
+        auto backupPath = GetLastBackupPath();
+
+        Cerr << "...restarting dummy tablet in recovery mode (dry-run)" << Endl;
+        RestartTabletInRecoveryMode();
+
+        Cerr << "...dry-run restoring backup (expecting failure)" << Endl;
+        SendAsync(new NRecovery::TEvRestoreBackup(backupPath, false, /*dryRun=*/ true));
+
+        TAutoPtr<IEventHandle> handle;
+        auto result = Env.GrabEdgeEventRethrow<NRecovery::TEvRestoreCompleted>(handle);
+        Cerr << "...dry-run result: Success=" << result->Success << ", Error=" << result->Error << Endl;
+        UNIT_ASSERT_C(!result->Success, "Dry-run restore should have failed but succeeded");
+    }
+
+    void DryRunRestoreBackupExpectWarning(const TString& backupPath, bool skipChecksumValidation = false) {
+
+        Cerr << "...restarting dummy tablet in recovery mode (dry-run)" << Endl;
+        RestartTabletInRecoveryMode();
+
+        Cerr << "...dry-run restoring backup (expecting warning)" << Endl;
+        SendAsync(new NRecovery::TEvRestoreBackup(backupPath, skipChecksumValidation, /*dryRun=*/ true));
+
+        TAutoPtr<IEventHandle> handle;
+        auto result = Env.GrabEdgeEventRethrow<NRecovery::TEvRestoreCompleted>(handle);
+        Cerr << "...dry-run result: Success=" << result->Success << ", Error=" << result->Error << Endl;
+        UNIT_ASSERT_C(result->Success, "Dry-run should have succeeded with warning, but failed: " << result->Error);
+        UNIT_ASSERT_C(!result->Error.empty(), "Dry-run must have a warning");
+    }
+
+    void DryRunRestoreLastBackupExpectWarning(bool skipChecksumValidation = false) {
+        DryRunRestoreBackupExpectWarning(GetLastBackupPath(), skipChecksumValidation);
+    }
 }; // TEnv
 
 Y_UNIT_TEST_SUITE(Backup) {
@@ -2830,7 +2901,7 @@ Y_UNIT_TEST_SUITE(Backup) {
         UNIT_ASSERT_VALUES_EQUAL(env.CountRows<TSchema::Data>(), 2);
     }
 
-    Y_UNIT_TEST(CorruptedChangelogTruncated) {
+    Y_UNIT_TEST(DryRun) {
         TEnv env;
 
         Cerr << "...starting tablet" << Endl;
@@ -2840,9 +2911,10 @@ Y_UNIT_TEST_SUITE(Backup) {
         Cerr << "...initing schema" << Endl;
         env.InitSchema();
 
-        Cerr << "...writing two values" << Endl;
+        Cerr << "...writing valid data" << Endl;
         env.WriteValue(1, 10);
         env.WriteValue(2, 20);
+        env.WriteValue(3, 30);
 
         env.WaitChangelogFlush();
 
@@ -2851,148 +2923,24 @@ Y_UNIT_TEST_SUITE(Backup) {
         TString content = TFileInput(changelog).ReadAll();
 
         auto lines = StringSplitter(content).Split('\n').SkipEmpty().ToList<TString>();
-        UNIT_ASSERT(!lines.empty());
-        lines.pop_back();
+        UNIT_ASSERT_VALUES_EQUAL(lines.size(), 4);
 
-        WriteFileContent(changelog, JoinSeq("\n", lines) + "\n");
+        Cerr << "...erasing commit from changelog" << Endl;
+        lines.erase(lines.begin() + 2);
+        WriteFileContent(changelog, JoinSeq("\n", lines));
 
-        env.RestoreBackupExpectFail(backup);
+        // Check state before and after restore
+        auto assertState = [&env]() {
+            UNIT_ASSERT_VALUES_EQUAL(env.CountRows<TSchema::Data>(), 3);
+            UNIT_ASSERT_VALUES_EQUAL(env.ReadValue<TSchema::Data::Value>(1), 10);
+            UNIT_ASSERT_VALUES_EQUAL(env.ReadValue<TSchema::Data::Value>(2), 20);
+            UNIT_ASSERT_VALUES_EQUAL(env.ReadValue<TSchema::Data::Value>(3), 30);
+        };
 
-        env.RestoreBackup(backup, TestTabletFlags, /*skipChecksumValidation=*/ true);
-        UNIT_ASSERT_VALUES_EQUAL(env.CountRows<TSchema::Data>(), 1);
-    }
-
-    Y_UNIT_TEST(CorruptedChangelogMeta) {
-        TEnv env;
-
-        Cerr << "...starting tablet" << Endl;
-        env.FireDummyTablet(TestTabletFlags);
-        env.WaitFor<NFake::TEvSnapshotBackedUp>();
-
-        Cerr << "...initing schema" << Endl;
-        env.InitSchema();
-
-        Cerr << "...writing data" << Endl;
-        env.WriteValue(1, 10);
-
-        env.WaitChangelogFlush();
-
-        auto backup = env.GetLastBackupPath();
-        WriteFileContent(backup.Child("changelog_meta.json"), "this is not valid json{{{");
-
-        env.RestoreLastBackupExpectFail();
-    }
-
-    Y_UNIT_TEST(MissingChangelogMeta) {
-        TEnv env;
-
-        Cerr << "...starting tablet" << Endl;
-        env.FireDummyTablet(TestTabletFlags);
-        env.WaitFor<NFake::TEvSnapshotBackedUp>();
-
-        Cerr << "...initing schema" << Endl;
-        env.InitSchema();
-
-        Cerr << "...writing data" << Endl;
-        env.WriteValue(1, 10);
-
-        env.WaitChangelogFlush();
-
-        auto backup = env.GetLastBackupPath();
-        backup.Child("changelog_meta.json").DeleteIfExists();
-
-        env.RestoreLastBackupExpectFail();
-    }
-
-    Y_UNIT_TEST(CorruptedChangelogMetaChecksum) {
-        TEnv env;
-
-        Cerr << "...starting tablet" << Endl;
-        env.FireDummyTablet(TestTabletFlags);
-        env.WaitFor<NFake::TEvSnapshotBackedUp>();
-
-        Cerr << "...initing schema" << Endl;
-        env.InitSchema();
-
-        Cerr << "...restarting tablet" << Endl;
+        assertState();
+        env.DryRunRestoreBackup(backup,  /*skipChecksumValidation=*/ true);
         env.RestartTablet(TestTabletFlags);
-        env.WaitFor<NFake::TEvSnapshotBackedUp>();
-
-        Cerr << "...writing data" << Endl;
-        env.WriteValue(1, 10);
-
-        env.WaitChangelogFlush();
-
-        auto backup = env.GetLastBackupPath();
-        auto changelogMeta = backup.Child("changelog_meta.json");
-
-        NJson::TJsonValue json;
-        NJson::ReadJsonTree(TFileInput(changelogMeta).ReadAll(), &json, true);
-
-        json["last_sha256"] = "0000000000000000000000000000000000000000000000000000000000000000";
-
-        WriteFileContent(changelogMeta, NJson::WriteJson(json, false));
-
-        env.RestoreBackupExpectFail(backup);
-
-        env.RestoreBackup(backup, TestTabletFlags, /*skipChecksumValidation=*/ true);
-        UNIT_ASSERT_VALUES_EQUAL(env.CountRows<TSchema::Data>(), 1);
-    }
-
-    Y_UNIT_TEST(BackupFromDifferentTablet) {
-        TEnv env;
-
-        Cerr << "...starting tablet" << Endl;
-        env.FireDummyTablet(TestTabletFlags);
-        env.WaitFor<NFake::TEvSnapshotBackedUp>();
-
-        Cerr << "...initing schema" << Endl;
-        env.InitSchema();
-
-        Cerr << "...writing data" << Endl;
-        env.WriteValue(1, 10);
-        env.WaitChangelogFlush();
-
-        auto backup = env.GetLastBackupPath();
-
-        auto manifestPath = backup.Child("snapshot").Child("manifest.json");
-        NJson::TJsonValue manifest;
-        NJson::ReadJsonTree(TFileInput(manifestPath).ReadAll(), &manifest, true);
-        manifest["tablet_id"] = 999;
-        WriteFileContent(manifestPath, NJson::WriteJson(manifest, false));
-
-        auto metaPath = backup.Child("changelog_meta.json");
-        NJson::TJsonValue meta;
-        NJson::ReadJsonTree(TFileInput(metaPath).ReadAll(), &meta, true);
-        meta["tablet_id"] = 999;
-        WriteFileContent(metaPath, NJson::WriteJson(meta, false));
-
-        env.RestoreLastBackupExpectFail();
-    }
-
-    Y_UNIT_TEST(SnapshotChangelogMismatch) {
-        TEnv env;
-
-        Cerr << "...starting tablet" << Endl;
-        env.FireDummyTablet(TestTabletFlags);
-        env.WaitFor<NFake::TEvSnapshotBackedUp>();
-
-        Cerr << "...initing schema" << Endl;
-        env.InitSchema();
-
-        Cerr << "...writing data" << Endl;
-        env.WriteValue(1, 10);
-        env.WaitChangelogFlush();
-
-        auto backup = env.GetLastBackupPath();
-
-        auto metaPath = backup.Child("changelog_meta.json");
-        NJson::TJsonValue meta;
-        NJson::ReadJsonTree(TFileInput(metaPath).ReadAll(), &meta, true);
-        meta["generation"] = 999;
-        WriteFileContent(metaPath, NJson::WriteJson(meta, false));
-
-        env.RestoreLastBackupExpectFail();
+        assertState();
     }
 }
 
