@@ -30,6 +30,7 @@
 #include <util/stream/file.h>
 
 #define LOG_D(stream) LOG_DEBUG_S(*TlsActivationContext, NKikimrServices::LOCAL_DB_BACKUP, stream)
+#define LOG_E(stream) LOG_ERROR_S(*TlsActivationContext, NKikimrServices::LOCAL_DB_BACKUP, stream)
 
 namespace NKikimr::NTabletFlatExecutor::NBackup {
 
@@ -165,6 +166,33 @@ TFsPath CreateBackupPath(TTabletTypes::EType tabletType, ui64 tabletId, ui32 gen
     return path;
 }
 
+ui64 MaxBackupsLimit() {
+    return AppData()->SystemTabletBackupConfig.GetMaxBackupsLimit();
+}
+
+using TGenStep = std::pair<ui32, ui32>;
+
+std::optional<TGenStep> ParseBackupGenStep(const TString& name) {
+    auto parts = StringSplitter(name).Split('_').ToList<TString>();
+    if (parts.size() < 4) {
+        return std::nullopt;
+    }
+
+    try {
+        const auto& genPart = parts[2];
+        const auto& stepPart = parts[3];
+        if (!genPart.StartsWith('g') || !stepPart.StartsWith('s')) {
+            return std::nullopt;
+        }
+        ui32 gen = FromString<ui32>(genPart.substr(1));
+        ui32 step = FromString<ui32>(stepPart.substr(1));
+        return std::make_pair(gen, step);
+    } catch (const std::exception& e) {
+        LOG_E("Failed to parse backup gen step from " << name << ": " << e.what());
+        return std::nullopt;
+    }
+}
+
 ui64 NewBackupChangelogMinBytes() {
     return AppData()->SystemTabletBackupConfig.GetNewBackupChangelogMinBytes();
 }
@@ -186,6 +214,7 @@ public:
                     TTabletTypes::EType tabletType, ui64 tabletId, ui32 generation, ui32 step,
                     TAutoPtr<TSchemeChanges> schema, TIntrusiveConstPtr<TBackupExclusion> exclusion)
         : Owner(owner)
+        , BackupPath(path)
         , SnapshotPath(path.Child("snapshot.tmp"))
         , FinalSnapshotPath(path.Child("snapshot"))
         , TabletType(tabletType)
@@ -202,6 +231,8 @@ public:
 
     void Bootstrap() {
         LOG_D("Bootstrap for " << SnapshotPath);
+
+        DeleteOldBackups();
 
         try {
             SnapshotPath.MkDirs();
@@ -243,6 +274,41 @@ public:
         }
 
         Become(&TThis::StateWork);
+    }
+
+    void DeleteOldBackups() {
+        try {
+            const auto backupGenStep = TGenStep{Generation, Step};
+    
+            TVector<TFsPath> children;
+            BackupPath.List(children);
+    
+            TVector<std::pair<TGenStep, TFsPath>> backups;
+            for (const auto& child : children) {
+                auto genStep = ParseBackupGenStep(child.Basename());
+    
+                if (genStep && child.Child("snapshot").Exists()) {
+                    backups.emplace_back(*genStep, child);
+                    continue;
+                }
+    
+                if (genStep >= backupGenStep) {
+                    continue;
+                }
+    
+                child.ForceDelete();
+            }
+    
+            std::sort(backups.begin(), backups.end(), [](const auto& a, const auto& b) {
+                return a.first > b.first; // descending by (generation, step)
+            });
+    
+            for (size_t i = MaxBackupsLimit(); i < backups.size(); ++i) {
+                backups[i].second.ForceDelete();
+            }
+        } catch (const std::exception& e) {
+            LOG_E("Failed to delete old backups in " << BackupPath << ": " << e.what());
+        }
     }
 
     void ReplyAndDie(bool success = true, const TString& error = "") {
@@ -382,6 +448,8 @@ public:
             return ReplyAndDie(false, TStringBuilder() << "Failed to flush parent dir after rename " << FinalSnapshotPath.Parent() << ": " << e.what());
         }
 
+        DeleteOldBackups();
+
         return ReplyAndDie();
     }
 
@@ -392,6 +460,7 @@ public:
 private:
     TActorId Owner;
 
+    TFsPath BackupPath;
     TFsPath SnapshotPath;
     TFsPath FinalSnapshotPath;
 
