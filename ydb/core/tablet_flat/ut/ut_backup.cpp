@@ -973,7 +973,6 @@ Y_UNIT_TEST_SUITE(Backup) {
 
     Y_UNIT_TEST(GenerationDirs) {
         TEnv env;
-        env->GetAppData().SystemTabletBackupConfig.SetMaxBackupsLimit(10);
 
         Cerr << "...starting tablet" << Endl;
         env.FireDummyTablet(TestTabletFlags);
@@ -1669,7 +1668,6 @@ Y_UNIT_TEST_SUITE(Backup) {
 
     Y_UNIT_TEST(ChangelogTornWrite) {
         TEnv env;
-        env->GetAppData().SystemTabletBackupConfig.SetMaxBackupsLimit(10);
 
         Cerr << "...starting tablet" << Endl;
         env.FireDummyTablet(TestTabletFlags);
@@ -1784,7 +1782,6 @@ Y_UNIT_TEST_SUITE(Backup) {
 
     Y_UNIT_TEST(NoBackupTable) {
         TEnv env;
-        env->GetAppData().SystemTabletBackupConfig.SetMaxBackupsLimit(10);
 
         Cerr << "...starting tablet" << Endl;
         env.FireDummyTablet(TestTabletFlags);
@@ -1856,7 +1853,6 @@ Y_UNIT_TEST_SUITE(Backup) {
 
     Y_UNIT_TEST(NoBackupColumn) {
         TEnv env;
-        env->GetAppData().SystemTabletBackupConfig.SetMaxBackupsLimit(10);
 
         Cerr << "...starting tablet" << Endl;
         env.FireDummyTablet(TestTabletFlags);
@@ -2475,7 +2471,6 @@ Y_UNIT_TEST_SUITE(Backup) {
     Y_UNIT_TEST(NewSnapshotChangelogSize) {
         TEnv env;
 
-        env->GetAppData().SystemTabletBackupConfig.SetMaxBackupsLimit(10);
 
         // Small limit
         env->GetAppData().SystemTabletBackupConfig.SetNewBackupChangelogMinBytes(100);
@@ -3169,11 +3164,12 @@ Y_UNIT_TEST_SUITE(Backup) {
         TVector<TFsPath> genDirs;
         tabletIdDir.List(genDirs);
 
-        UNIT_ASSERT_VALUES_EQUAL(genDirs.size(), 1);
+        UNIT_ASSERT_VALUES_EQUAL(genDirs.size(), 3);
     }
 
     Y_UNIT_TEST(DeleteBackupsRace) {
         TEnv env;
+        env->GetAppData().SystemTabletBackupConfig.SetMaxBackupsLimit(1);
 
         Cerr << "...starting tablet" << Endl;
         env.FireDummyTablet(TestTabletFlags);
