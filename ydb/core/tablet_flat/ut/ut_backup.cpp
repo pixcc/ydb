@@ -878,10 +878,6 @@ struct TEnv : public TMyEnvBase {
         RestoreBackupExpectWarning(GetLastBackupPath(), testTabletFlags, skipChecksumValidation);
     }
 
-    void RestoreLastBackupExpectFail() {
-        RestoreBackupExpectFail(GetLastBackupPath());
-    }
-
     TFsPath GetLastBackupPath() {
         auto tabletIdDir = TFsPath(Env.GetTempDir())
             .Child("dummy")
