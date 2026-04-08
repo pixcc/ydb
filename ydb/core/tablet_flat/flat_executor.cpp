@@ -48,6 +48,10 @@
 #include <util/generic/ymath.h>
 
 
+#define LOG_BACKUP_N(stream) LOG_NOTICE_S(*TlsActivationContext, NKikimrServices::LOCAL_DB_BACKUP, BackupLogPrefix() << stream)
+#define LOG_BACKUP_D(stream) LOG_DEBUG_S(*TlsActivationContext, NKikimrServices::LOCAL_DB_BACKUP, BackupLogPrefix() << stream)
+#define LOG_BACKUP_E(stream) LOG_ERROR_S(*TlsActivationContext, NKikimrServices::LOCAL_DB_BACKUP, BackupLogPrefix() << stream)
+
 namespace NKikimr {
 namespace NTabletFlatExecutor {
 
@@ -5148,6 +5152,10 @@ void TExecutor::SetPreloadTablesData(THashSet<ui32> tables) {
 }
 
 
+TStringBuilder TExecutor::BackupLogPrefix() const {
+    return TStringBuilder() << "[" << Owner->TabletID() << ":" << Generation0 << "] ";
+}
+
 void TExecutor::StartNewBackup() {
     if (!Owner->NeedBackup()) {
         return;
@@ -5162,8 +5170,7 @@ void TExecutor::StartNewBackup() {
     ui64 tabletId = Owner->TabletID();
 
     if (std::find(excludeTabletIds.begin(), excludeTabletIds.end(), tabletId) != excludeTabletIds.end()) {
-        LOG_DEBUG_S(*TlsActivationContext, NKikimrServices::LOCAL_DB_BACKUP,
-            "[" << tabletId << "] Tablet excluded from backup");
+        LOG_BACKUP_D("Tablet excluded from backup");
         return;
     }
 
@@ -5186,8 +5193,7 @@ void TExecutor::StartNewBackup() {
         tabletId, Generation0, Step0, scheme, exclusion);
 
     if (snapshotWriter && changelogWriter) {
-        LOG_NOTICE_S(*TlsActivationContext, NKikimrServices::LOCAL_DB_BACKUP,
-            "[" << tabletId << "] Starting new backup, type " << tabletType << " gen " << Generation0 << " step " << Step0);
+        LOG_BACKUP_N("Starting new backup, type " << tabletType << " gen " << Generation0 << " step " << Step0);
         auto snapshotWriterActor = Register(snapshotWriter, TMailboxType::HTSwap, AppData()->IOPoolId);
         for (const auto& [tableId, table] : tables) {
             if (exclusion && exclusion->HasTable(tableId)) {
@@ -5203,8 +5209,7 @@ void TExecutor::StartNewBackup() {
         auto changelogWriterActor = Register(changelogWriter, TMailboxType::HTSwap, AppData()->IOPoolId);
         CommitManager->BackupLogic.Start(SelfId(), changelogWriterActor, backupConfig.GetChangelogInFlightBytesLimit());
     } else {
-        LOG_DEBUG_S(*TlsActivationContext, NKikimrServices::LOCAL_DB_BACKUP,
-            "[" << tabletId << "] Backup not configured");
+        LOG_BACKUP_D("Backup not configured");
     }
 }
 
@@ -5220,8 +5225,7 @@ void TExecutor::Handle(NBackup::TEvSnapshotCompleted::TPtr& ev) {
     BackupSnapshotInProgress = false;
     Counters->Simple()[TExecutorCounters::BACKUP_SNAPSHOT_IN_PROGRESS].Set(0);
     if (ev->Get()->Success) {
-        LOG_NOTICE_S(*TlsActivationContext, NKikimrServices::LOCAL_DB_BACKUP,
-            "[" << Owner->TabletID() << "] Snapshot completed, " << ev->Get()->WrittenBytes << " bytes");
+        LOG_BACKUP_N("Snapshot completed, " << ev->Get()->WrittenBytes << " bytes");
         Owner->BackupSnapshotComplete(OwnerCtx());
 
         if (CommitManager->BackupLogic.IsRunning()) {
@@ -5251,8 +5255,7 @@ void TExecutor::FailBackup(const TString& error) {
         Y_TABLET_ERROR(error);
     }
 
-    LOG_ERROR_S(*TlsActivationContext, NKikimrServices::LOCAL_DB_BACKUP,
-        "[" << Owner->TabletID() << "] " << error);
+    LOG_BACKUP_E(error);
     CommitManager->BackupLogic.Stop();
     ScheduleRetryBackup();
 }
@@ -5260,8 +5263,7 @@ void TExecutor::FailBackup(const TString& error) {
 void TExecutor::ScheduleRetryBackup() const {
     if (!BackupSnapshotInProgress) {
         auto retryTimeout = TDuration::Seconds(AppData()->SystemTabletBackupConfig.GetRetryBackupTimeoutSeconds());
-        LOG_NOTICE_S(*TlsActivationContext, NKikimrServices::LOCAL_DB_BACKUP,
-            "[" << Owner->TabletID() << "] Scheduling backup retry in " << retryTimeout);
+        LOG_BACKUP_N("Scheduling backup retry in " << retryTimeout);
         Schedule(retryTimeout, new NBackup::TEvStartNewBackup);
     }
 }
