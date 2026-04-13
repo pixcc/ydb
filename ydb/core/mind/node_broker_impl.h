@@ -53,6 +53,7 @@ public:
             EvUpdateEpoch = EventSpaceBegin(TEvents::ES_PRIVATE),
             EvResolvedRegistrationRequest,
             EvProcessSubscribersQueue,
+            EvLoadTick,
 
             EvEnd
         };
@@ -81,6 +82,8 @@ public:
         };
 
         struct TEvProcessSubscribersQueue : public TEventLocal<TEvProcessSubscribersQueue, EvProcessSubscribersQueue> {};
+
+        struct TEvLoadTick : public TEventLocal<TEvLoadTick, EvLoadTick> {};
     };
 
 private:
@@ -194,6 +197,8 @@ private:
     class TTxUpdateConfig;
     class TTxUpdateConfigSubscription;
     class TTxUpdateEpoch;
+    class TTxLoadInsert;
+    class TTxLoadUpdate;
 
     struct TDbChanges;
 
@@ -207,6 +212,8 @@ private:
     ITransaction *CreateTxUpdateConfig(TEvNodeBroker::TEvSetConfigRequest::TPtr &ev);
     ITransaction *CreateTxUpdateConfigSubscription(TEvConsole::TEvReplaceConfigSubscriptionsResponse::TPtr &ev);
     ITransaction *CreateTxUpdateEpoch();
+    ITransaction *CreateTxLoadInsert();
+    ITransaction *CreateTxLoadUpdate();
 
     void OnActivateExecutor(const TActorContext &ctx) override;
     void OnDetach(const TActorContext &ctx) override;
@@ -259,6 +266,7 @@ private:
             HFuncTraced(TEvPrivate::TEvUpdateEpoch, Handle);
             HFuncTraced(TEvPrivate::TEvResolvedRegistrationRequest, Handle);
             HFuncTraced(TEvPrivate::TEvProcessSubscribersQueue, Handle);
+            HFunc(TEvPrivate::TEvLoadTick, Handle);
             HFunc(TEvTabletPipe::TEvServerDisconnected, Handle);
             hFunc(TEvTabletPipe::TEvServerConnected, Handle);
             IgnoreFunc(NConsole::TEvConfigsDispatcher::TEvSetConfigSubscriptionResponse);
@@ -335,6 +343,24 @@ private:
                 const TActorContext &ctx);
     void Handle(TEvPrivate::TEvProcessSubscribersQueue::TPtr &ev,
                 const TActorContext &ctx);
+    void Handle(TEvPrivate::TEvLoadTick::TPtr &ev, const TActorContext &ctx);
+
+    enum class ELoadType {
+        Insert,
+        Update
+    };
+
+    struct TLoadGenerator {
+        ELoadType Type;
+        ui32 Rate;
+        ui64 ExecutedOps = 0;
+        size_t BatchSize = 1;
+    };
+
+    THolder<TLoadGenerator> LoadGenerator;
+
+    void StartLoadGenerator(const TActorContext &ctx, ELoadType type, ui32 rate, ui32 batch);
+    void StopLoadGenerator(const TActorContext &ctx);
 
     bool EnableStableNodeNames = false;
     ui64 MaxStaticId;
@@ -380,6 +406,9 @@ private:
         void ClearState();
         void UpdateLocation(TNodeInfo &node, const TNodeLocation &location);
         TNodeInfo* FindNode(ui32 nodeId);
+
+        bool InsertWorkload = false;
+        bool UpdateWorkload = false;
 
         // All registered dynamic nodes.
         THashMap<ui32, TNodeInfo> Nodes;

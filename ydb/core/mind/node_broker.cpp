@@ -101,7 +101,7 @@ void TNodeBroker::OnActivateExecutor(const TActorContext &ctx)
 
     MaxStaticId = Min(appData->DynamicNameserviceConfig->MaxStaticNodeId, TActorId::MaxNodeId);
     MinDynamicId = Max(MaxStaticId + 1, (ui64)Min(appData->DynamicNameserviceConfig->MinDynamicNodeId, TActorId::MaxNodeId));
-    MaxDynamicId = Max(MinDynamicId, (ui64)Min(appData->DynamicNameserviceConfig->MaxDynamicNodeId, TActorId::MaxNodeId));
+    MaxDynamicId = std::numeric_limits<ui32>::max();
 
     EnableStableNodeNames = appData->FeatureFlags.GetEnableStableNodeNames();
 
@@ -133,11 +133,27 @@ void TNodeBroker::DefaultSignalTabletActive(const TActorContext &ctx)
     Y_UNUSED(ctx);
 }
 
+
 bool TNodeBroker::OnRenderAppHtmlPage(NMon::TEvRemoteHttpInfo::TPtr ev,
                                       const TActorContext &ctx)
 {
     if (!ev)
         return true;
+
+    auto cgi = ev->Get()->Cgi();
+    if (const auto& path = cgi.Get("load")) {
+        if (path == "insert") {
+            ui32 rate = FromString<ui32>(cgi.Get("rate"));
+            ui32 batch = FromString<ui32>(cgi.Get("batch"));
+            StartLoadGenerator(ctx, ELoadType::Insert, rate, batch);
+        } else if (path == "update") {
+            ui32 rate = FromString<ui32>(cgi.Get("rate"));
+            ui32 batch = FromString<ui32>(cgi.Get("batch"));
+            StartLoadGenerator(ctx, ELoadType::Update, rate, batch);
+        } else if (path == "stop") {
+            StopLoadGenerator(ctx);
+        }
+    }
 
     TStringStream str;
     HTML(str) {
@@ -152,6 +168,20 @@ bool TNodeBroker::OnRenderAppHtmlPage(NMon::TEvRemoteHttpInfo::TPtr ev,
             for (auto &pr : Committed.BannedIds)
                 str << " [" << pr.first << ", " << pr.second << "]";
             str << Endl << Endl;
+
+            // Load generator status
+            str << "Load Generator:" << Endl;
+            if (LoadGenerator) {
+                str << "  Status: RUNNING" << Endl
+                    << "  Type: " << (LoadGenerator->Type == ELoadType::Insert ? "INSERT" : "UPDATE") << Endl
+                    << "  Rate: " << LoadGenerator->Rate << " tx/sec" << Endl
+                    << "  Batch size: " << LoadGenerator->BatchSize << " ops" << Endl
+                    << "  Executed: " << LoadGenerator->ExecutedOps << " ops" << Endl;
+            } else {
+                str << "  Status: STOPPED" << Endl;
+            }
+            str << Endl;
+
             str << "Registered nodes:" << Endl;
 
             TSet<ui32> ids;
@@ -1049,9 +1079,9 @@ TNodeBroker::TDbChanges TNodeBroker::TDirtyState::DbLoadState(TTransactionContex
         if (dbChanges.Merge(DbLoadNodes(nodesRowset, ctx)); !dbChanges.Ready) {
             return dbChanges;
         }
-        if (dbChanges.Merge(DbMigrateNodes(nodesV2Rowset, ctx)); !dbChanges.Ready) {
-            return dbChanges;
-        }
+        // if (dbChanges.Merge(DbMigrateNodes(nodesV2Rowset, ctx)); !dbChanges.Ready) {
+        //     return dbChanges;
+        // }
     } else if (mainNodesTable == Schema::EMainNodesTable::NodesV2) {
         if (dbChanges.Merge(DbLoadNodesV2(nodesV2Rowset, ctx)); !dbChanges.Ready) {
             return dbChanges;
@@ -1086,7 +1116,7 @@ TNodeBroker::TDbChanges TNodeBroker::TDirtyState::DbLoadNodes(auto &nodesRowset,
             toRemove.push_back(id);
             TNodeInfo info{id, ENodeState::Removed, Epoch.Version + 1};
             AddNode(info);
-        } else {
+        } else if (id < Self->MinDynamicId + 10) {
             auto expire = TInstant::FromValue(nodesRowset.template GetValue<Schema::Nodes::Expire>());
             std::optional<TNodeLocation> modernLocation;
             if (nodesRowset.template HaveValue<Schema::Nodes::Location>()) {
@@ -1118,6 +1148,8 @@ TNodeBroker::TDbChanges TNodeBroker::TDirtyState::DbLoadNodes(auto &nodesRowset,
 
             LOG_DEBUG_S(ctx, NKikimrServices::NODE_BROKER,
                         DbLogPrefix() << " Loaded node " << info.ToString());
+        } else {
+            Self->Dirty.FreeIds.Reset(id);
         }
 
         if (!nodesRowset.Next())
@@ -1726,6 +1758,54 @@ void TNodeBroker::Handle(TEvPrivate::TEvProcessSubscribersQueue::TPtr &, const T
             SendUpdateNodes(subscriber, ctx);
             ScheduleProcessSubscribersQueue(ctx);
         }
+    }
+}
+
+void TNodeBroker::Handle(TEvPrivate::TEvLoadTick::TPtr &ev, const TActorContext &ctx)
+{
+    Y_UNUSED(ev);
+    if (!LoadGenerator) {
+        return;
+    }
+
+    switch (LoadGenerator->Type) {
+        case ELoadType::Insert:
+            Execute(CreateTxLoadInsert(), ctx);
+            break;
+        case ELoadType::Update:
+            Execute(CreateTxLoadUpdate(), ctx);
+            break;
+    }
+
+    // Schedule next tick
+    auto delay = TDuration::MilliSeconds(1000 / LoadGenerator->Rate);
+    ctx.Schedule(delay, new TEvPrivate::TEvLoadTick());
+}
+
+void TNodeBroker::StartLoadGenerator(const TActorContext &ctx, ELoadType type, ui32 rate, ui32 batch)
+{
+    if (LoadGenerator) {
+        StopLoadGenerator(ctx);
+    }
+
+    LoadGenerator = MakeHolder<TLoadGenerator>();
+    LoadGenerator->Type = type;
+    LoadGenerator->Rate = rate;
+    LoadGenerator->BatchSize = batch;
+
+    LOG_INFO_S(ctx, NKikimrServices::NODE_BROKER,
+               "Started load generator: type=" << (type == ELoadType::Insert ? "INSERT" : "UPDATE")
+               << " rate=" << rate << " ops/sec");
+
+    ctx.Send(SelfId(), new TEvPrivate::TEvLoadTick());
+}
+
+void TNodeBroker::StopLoadGenerator(const TActorContext &ctx)
+{
+    if (LoadGenerator) {
+        LOG_INFO_S(ctx, NKikimrServices::NODE_BROKER,
+                   "Stopped load generator: executed=" << LoadGenerator->ExecutedOps << " ops");
+        LoadGenerator.Reset();
     }
 }
 
