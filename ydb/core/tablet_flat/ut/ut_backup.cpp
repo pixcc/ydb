@@ -2782,9 +2782,8 @@ Y_UNIT_TEST_SUITE(Backup) {
     Y_UNIT_TEST(NewSnapshotChangelogSize) {
         TEnv env;
 
-
         // Small limit
-        env->GetAppData().SystemTabletBackupConfig.SetNewBackupChangelogMinBytes(100);
+        env->GetAppData().SystemTabletBackupConfig.SetNewBackupChangelogMinBytes(10_KB);
 
         Cerr << "...starting tablet" << Endl;
         env.FireDummyTablet(TestTabletFlags);
