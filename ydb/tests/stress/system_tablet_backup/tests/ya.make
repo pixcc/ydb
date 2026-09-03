@@ -17,6 +17,7 @@ DEPENDS(
 PEERDIR(
     ydb/tests/library
     ydb/tests/library/stress
+    ydb/tests/stress/system_tablet_backup/consistency
     ydb/tests/stress/system_tablet_backup/workload
 )
 

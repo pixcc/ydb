@@ -11,6 +11,10 @@ PEERDIR(
 
 END()
 
+RECURSE(
+    consistency
+)
+
 RECURSE_FOR_TESTS(
     tests
 )

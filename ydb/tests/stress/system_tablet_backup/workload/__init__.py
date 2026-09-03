@@ -12,68 +12,15 @@ import shlex
 
 from urllib.parse import urlparse, quote
 
-from ydb.public.api.grpc import ydb_discovery_v1_pb2_grpc
 from ydb.public.api.protos import ydb_config_pb2 as config_api
-from ydb.public.api.protos import ydb_discovery_pb2
 from ydb.public.api.protos.draft import ydb_dynamic_config_pb2 as dynconfig_api
 from ydb.public.api.protos.ydb_status_codes_pb2 import StatusIds
 from ydb.tests.library.clients.kikimr_config_client import ConfigClient
 from ydb.tests.library.clients.kikimr_dynconfig_client import DynConfigClient
-from ydb.tests.stress.common.common import WorkloadBase
 
-
-class WorkloadRegisterNode(WorkloadBase):
-    def __init__(self, client, stop):
-        super().__init__(client, "", "register_node", stop)
-        self.registered = 0
-        self.next_id = 0
-        self.lock = threading.Lock()
-
-    def get_stat(self):
-        with self.lock:
-            return f"Registered: {self.registered}"
-
-    def _get_next_id(self):
-        with self.lock:
-            node_id = self.next_id
-            self.next_id += 1
-            return node_id
-
-    def _register_node(self, node_id):
-        request = ydb_discovery_pb2.NodeRegistrationRequest(
-            host="system.tablet.backup.fake." + str(node_id),
-            port=19001,
-            resolve_host="system.tablet.backup.fake." + str(node_id),
-            address="594f:10c7:ad54:eada:99eb:7b5b:eec2:0000",
-            location=ydb_discovery_pb2.NodeLocation(
-                data_center="DC",
-                module="1",
-                rack="2",
-                unit="3",
-            ),
-            path=self.client.database,
-        )
-
-        self.client.driver(
-            request,
-            ydb_discovery_v1_pb2_grpc.DiscoveryServiceStub,
-            "NodeRegistration",
-            ydb.operation.Operation,
-            None,
-            (self.client.driver,),
-        )
-
-    def _register_node_loop(self):
-        while not self.is_stop_requested():
-            try:
-                self._register_node(self._get_next_id())
-                with self.lock:
-                    self.registered += 1
-            except (ydb.Unavailable, ydb.ConnectionLost, ydb.GenericError):
-                time.sleep(1)
-
-    def get_workload_thread_funcs(self):
-        return [self._register_node_loop for x in range(0, 10)]
+from .ledger import open_ledger
+from .registry import WorkloadContext, build_workloads, select_workloads
+from .generators.register_node import WorkloadRegisterNode  # noqa: F401  (kept importable)
 
 
 class BackupValidator:
@@ -471,39 +418,82 @@ class BackupValidator:
 
 
 class WorkloadRunner:
-    def __init__(self, client, duration, endpoint, mon_endpoint, backup_path):
+    def __init__(
+        self,
+        client,
+        duration,
+        endpoint,
+        mon_endpoint,
+        backup_path,
+        only_workloads=(),
+        exclude_workloads=(),
+        rps=None,
+        ledger_path=None,
+    ):
         self.client = client
         self.duration = duration
         self.endpoint = endpoint
         self.mon_endpoint = mon_endpoint
         self.backup_path = backup_path
+        self.only_workloads = list(only_workloads)
+        self.exclude_workloads = list(exclude_workloads)
+        self.rps = dict(rps or {})
+        self.ledger_path = ledger_path
+        self.ledger = None
         ydb.interceptor.monkey_patch_event_handler()
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        pass
+        if self.ledger is not None:
+            self.ledger.close()
+
+    def _make_context(self, stop):
+        parsed = urlparse(self.endpoint if "://" in self.endpoint else "grpc://" + self.endpoint)
+        self.ledger = open_ledger(self.ledger_path)
+        return WorkloadContext(
+            client=self.client,
+            stop=stop,
+            database=self.client.database,
+            mon_endpoint=self.mon_endpoint,
+            grpc_host=parsed.hostname or "localhost",
+            grpc_port=parsed.port or 2135,
+            ledger=self.ledger,
+            rps=self.rps,
+        )
 
     def run(self):
         stop = threading.Event()
-        workloads = [
-            WorkloadRegisterNode(self.client, stop),
-        ]
+        specs = select_workloads(only=self.only_workloads, exclude=self.exclude_workloads)
+        ctx = self._make_context(stop)
+        workloads = build_workloads(specs, ctx)
 
+        print("Running workloads: %s" % ", ".join(spec.name for spec in specs))
+        if self.ledger_path:
+            print("Ledger: %s" % self.ledger_path)
+
+        started = []
         for w in workloads:
-            w.start()
+            if w.start() is False:
+                print(f"\t{w.name}: did not start, skipped")
+                continue
+            started.append(w)
+
         started_at = time.time()
         while time.time() - started_at < self.duration:
             print(f"Elapsed {(int)(time.time() - started_at)} seconds, stat:")
-            for w in workloads:
+            for w in started:
                 print(f"\t{w.name}: {w.get_stat()}")
             time.sleep(10)
         stop.set()
         print("Waiting for stop...")
-        for w in workloads:
+        for w in started:
             w.join()
         print("Stopped")
+
+        if self.ledger is not None:
+            self.ledger.close()
 
         if self.backup_path:
             validator = BackupValidator(self.endpoint, self.mon_endpoint, self.backup_path)
