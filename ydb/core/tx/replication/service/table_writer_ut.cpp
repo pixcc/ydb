@@ -3,6 +3,7 @@
 #include "table_writer.h"
 #include "worker.h"
 
+#include <ydb/core/change_exchange/change_exchange.h>
 #include <ydb/core/tx/datashard/ut_common/datashard_ut_common.h>
 #include <ydb/core/tx/replication/ut_helpers/test_env.h>
 #include <ydb/core/tx/replication/ut_helpers/test_table.h>
@@ -17,6 +18,49 @@ namespace NKikimr::NReplication::NService {
 
 Y_UNIT_TEST_SUITE(LocalTableWriter) {
     using namespace NTestHelpers;
+
+    Y_UNIT_TEST_TWIN(ResidentBatchRouting, ManyPartitions) {
+        TEnv env(true, ERuntimeMode::Simulated);
+        env.CreateTable("/Root", *MakeTableDescription(TTestTableDescription{
+            .Name = "Table",
+            .KeyColumns = {"key"},
+            .Columns = {{.Name = "key", .Type = "Uint32"}, {.Name = "value", .Type = "Utf8"}},
+            .UniformPartitions = ManyPartitions ? 8u : 1u,
+        }));
+        const auto writer = env.GetRuntime().Register(CreateLocalTableWriter("/Root", env.GetPathId("/Root/Table")));
+        env.Send<TEvWorker::TEvHandshake>(writer, new TEvWorker::TEvHandshake());
+
+        ui32 requests = 0;
+        ui32 changes = 0;
+        ui32 bodyRequests = 0;
+        auto applyObserver = env.GetRuntime().AddObserver<TEvDataShard::TEvApplyReplicationChanges>(
+            [&](TEvDataShard::TEvApplyReplicationChanges::TPtr& ev) {
+                ++requests;
+                changes += ev->Get()->Record.ChangesSize();
+                // Each row has at least 2 KiB of body; no write may exceed
+                // the existing 192 KiB bound (except a single oversized row).
+                UNIT_ASSERT_LE(ev->Get()->Record.ChangesSize(), 96);
+            });
+        auto requestObserver = env.GetRuntime().AddObserver<NChangeExchange::TEvChangeExchange::TEvRequestRecords>(
+            [&](NChangeExchange::TEvChangeExchange::TEvRequestRecords::TPtr& ev) {
+                if (ev->Recipient == writer) {
+                    ++bodyRequests;
+                }
+            });
+
+        TVector<TTopicMessage> records;
+        const TString payload(2048, 'x');
+        for (ui32 i = 0; i < 512; ++i) {
+            const ui32 key = ManyPartitions ? (i % 8) * (1u << 29) + i / 8 : i;
+            records.emplace_back(i + 1, Sprintf(R"({"key":[%u],"update":{"value":"%s"}})", key, payload.c_str()));
+        }
+        env.Send<TEvWorker::TEvPoll>(writer, new TEvWorker::TEvData(0, "TestSource", std::move(records)));
+        UNIT_ASSERT_VALUES_EQUAL(changes, 512);
+        UNIT_ASSERT_VALUES_EQUAL(bodyRequests, 0);
+        UNIT_ASSERT_VALUES_EQUAL(requests, ManyPartitions ? 8 : 6);
+        const auto content = ReadShardedTable(env.GetRuntime(), "/Root/Table");
+        UNIT_ASSERT_VALUES_EQUAL(std::count(content.begin(), content.end(), '\n'), 512);
+    }
 
     Y_UNIT_TEST(WriteTable) {
         TEnv env;
@@ -40,6 +84,40 @@ Y_UNIT_TEST_SUITE(LocalTableWriter) {
             TRecord(2, R"({"key":[2], "reset":{"value":"20"}})"),
             TRecord(3, R"({"key":[3], "erase":{}})"),
         }));
+    }
+
+    Y_UNIT_TEST(ResidentBatchRetry) {
+        TEnv env(true, ERuntimeMode::Simulated);
+        env.CreateTable("/Root", *MakeTableDescription(TTestTableDescription{
+            .Name = "Table",
+            .KeyColumns = {"key"},
+            .Columns = {{.Name = "key", .Type = "Uint32"}, {.Name = "value", .Type = "Utf8"}},
+        }));
+        const auto writer = env.GetRuntime().Register(CreateLocalTableWriter("/Root", env.GetPathId("/Root/Table")));
+        env.Send<TEvWorker::TEvHandshake>(writer, new TEvWorker::TEvHandshake());
+
+        bool rejected = false;
+        auto observer = env.GetRuntime().AddObserver<TEvDataShard::TEvApplyReplicationChanges>(
+            [&](TEvDataShard::TEvApplyReplicationChanges::TPtr& ev) {
+                if (!rejected) {
+                    rejected = true;
+                    env.GetRuntime().Send(new IEventHandle(ev->Sender, ev->Recipient,
+                        new TEvDataShard::TEvApplyReplicationChangesResult(
+                            NKikimrTxDataShard::TEvApplyReplicationChangesResult::STATUS_REJECTED,
+                            NKikimrTxDataShard::TEvApplyReplicationChangesResult::REASON_WRONG_STATE,
+                            "Retry the first batch")));
+                    ev.Reset();
+                }
+            });
+        TVector<TTopicMessage> records;
+        const TString payload(2048, 'x');
+        for (ui32 i = 0; i < 512; ++i) {
+            records.emplace_back(i + 1, Sprintf(R"({"key":[%u],"update":{"value":"%s"}})", i, payload.c_str()));
+        }
+        env.Send<TEvWorker::TEvPoll>(writer, new TEvWorker::TEvData(0, "TestSource", std::move(records)));
+        UNIT_ASSERT(rejected);
+        const auto content = ReadShardedTable(env.GetRuntime(), "/Root/Table");
+        UNIT_ASSERT_VALUES_EQUAL(std::count(content.begin(), content.end(), '\n'), 512);
     }
 
     Y_UNIT_TEST(DuplicateSchemaReleaseAfterRefresh) {

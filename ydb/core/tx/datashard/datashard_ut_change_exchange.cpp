@@ -3892,6 +3892,125 @@ Y_UNIT_TEST_SUITE(Cdc) {
         UNIT_ASSERT_C(dataPages > 0 && dataPages <= 3, "Unexpected data page requests: " << dataPages);
     }
 
+    Y_UNIT_TEST(InitialScanLeavesQueueCapacityForWrites) {
+        TPortManager portManager;
+        TServer::TPtr server = new TServer(TServerSettings(portManager.GetPort(2134), {}, DefaultPQConfig())
+            .SetUseRealThreads(false)
+            .SetDomainName("Root")
+            .SetEnableChangefeedInitialScan(true)
+            .SetChangesQueueItemsLimit(4)
+        );
+
+        auto& runtime = *server->GetRuntime();
+        const auto edgeActor = runtime.AllocateEdgeActor();
+        SetupLogging(runtime);
+        InitRoot(server, edgeActor);
+        CreateShardedTable(server, edgeActor, "/Root", "Table", SimpleTable());
+        const auto tabletId = GetTableShards(server, edgeActor, "/Root/Table").at(0);
+        ExecSQL(server, edgeActor,
+            "UPSERT INTO `/Root/Table` (key, value) VALUES (1, 10), (2, 20);");
+
+        runtime.AddObserver<TEvDataShard::TEvCdcStreamScanRequest>([&](auto& ev) {
+            ev->Get()->Record.MutableLimits()->SetBatchMaxRows(2);
+        });
+        TBlockEvents<NChangeExchange::TEvChangeExchange::TEvEnqueueRecords> blockEnqueue(runtime);
+        WaitTxNotification(server, edgeActor, AsyncAlterAddStream(server, "/Root", "Table",
+            WithInitialScan(Updates(NKikimrSchemeOp::ECdcStreamFormatJson))));
+        runtime.WaitFor("Initial scan records enqueued", [&] { return blockEnqueue.size(); });
+
+        UNIT_ASSERT_VALUES_EQUAL(GetSimpleCounter(runtime, tabletId, "DataShard/ChangeQueueSize"), 2);
+        UNIT_ASSERT_VALUES_EQUAL(GetSimpleCounter(runtime, tabletId, "DataShard/ChangeQueueReservedCapacity"), 2);
+
+        // The two scan records already occupy queue slots. Their reservation
+        // must not also consume the two slots left for ordinary writes.
+        ExecSQL(server, edgeActor, "UPSERT INTO `/Root/Table` (key, value) VALUES (3, 30);");
+        ExecSQL(server, edgeActor, "UPSERT INTO `/Root/Table` (key, value) VALUES (4, 40);");
+        UNIT_ASSERT_VALUES_EQUAL(GetSimpleCounter(runtime, tabletId, "DataShard/ChangeQueueSize"), 4);
+        UNIT_ASSERT_VALUES_EQUAL(GetCumulativeCounter(runtime, tabletId, "DataShard/ChangeQueueOverflowRejects"), 0);
+
+        // Real queue exhaustion must still reject writes and recover on drain.
+        ExecSQL(server, edgeActor, "UPSERT INTO `/Root/Table` (key, value) VALUES (5, 50);",
+            true, Ydb::StatusIds::TIMEOUT);
+        UNIT_ASSERT_GT(GetCumulativeCounter(runtime, tabletId, "DataShard/ChangeQueueOverflowRejects"), 0);
+        blockEnqueue.Unblock().Stop();
+        WaitForContent(server, edgeActor, "/Root/Table/Stream", {
+            R"({"update":{"value":10},"key":[1]})",
+            R"({"update":{"value":20},"key":[2]})",
+            R"({"update":{"value":30},"key":[3]})",
+            R"({"update":{"value":40},"key":[4]})",
+        });
+        ExecSQL(server, edgeActor, "UPSERT INTO `/Root/Table` (key, value) VALUES (5, 50);");
+        WaitForContent(server, edgeActor, "/Root/Table/Stream", {
+            R"({"update":{"value":10},"key":[1]})",
+            R"({"update":{"value":20},"key":[2]})",
+            R"({"update":{"value":30},"key":[3]})",
+            R"({"update":{"value":40},"key":[4]})",
+            R"({"update":{"value":50},"key":[5]})",
+        });
+    }
+
+    Y_UNIT_TEST(InitialScanResumesOnDrainWithoutTimer) {
+        TPortManager portManager;
+        TServer::TPtr server = new TServer(TServerSettings(portManager.GetPort(2134), {}, DefaultPQConfig())
+            .SetUseRealThreads(false)
+            .SetDomainName("Root")
+            .SetEnableChangefeedInitialScan(true)
+            .SetChangesQueueItemsLimit(1)
+        );
+
+        auto& runtime = *server->GetRuntime();
+        const auto edgeActor = runtime.AllocateEdgeActor();
+        SetupLogging(runtime);
+        InitRoot(server, edgeActor);
+        CreateShardedTable(server, edgeActor, "/Root", "Table", SimpleTable());
+        const auto tabletId = GetTableShards(server, edgeActor, "/Root/Table").at(0);
+        ExecSQL(server, edgeActor,
+            "UPSERT INTO `/Root/Table` (key, value) VALUES (1, 10), (2, 20), (3, 30);");
+
+        auto scanLimits = runtime.AddObserver<TEvDataShard::TEvCdcStreamScanRequest>([&](auto& ev) {
+            ev->Get()->Record.MutableLimits()->SetBatchMaxRows(1);
+        });
+        TBlockEvents<NChangeExchange::TEvChangeExchange::TEvEnqueueRecords> blockEnqueue(runtime);
+        TVector<THolder<IEventHandle>> timers;
+        auto prevObserver = runtime.SetObserverFunc([&](TAutoPtr<IEventHandle>& ev) {
+            static constexpr ui32 EvCdcStreamScanWakeup = EventSpaceBegin(TKikimrEvents::ES_PRIVATE) + 34;
+            if (ev->GetTypeRewrite() == EvCdcStreamScanWakeup) {
+                auto* shard = dynamic_cast<TDataShard*>(runtime.FindActor(ev->GetRecipientRewrite()));
+                if (shard && shard->TabletID() == tabletId) {
+                    timers.emplace_back(ev.Release());
+                    return TTestActorRuntime::EEventAction::DROP;
+                }
+            }
+            return TTestActorRuntime::EEventAction::PROCESS;
+        });
+
+        WaitTxNotification(server, edgeActor, AsyncAlterAddStream(server, "/Root", "Table",
+            WithInitialScan(Updates(NKikimrSchemeOp::ECdcStreamFormatJson))));
+        runtime.WaitFor("Scan waiting for queue capacity", [&] { return !timers.empty(); });
+        UNIT_ASSERT_VALUES_EQUAL(GetSimpleCounter(runtime, tabletId, "DataShard/ChangeQueueSize"), 1);
+        // A full queue should defer the packet before entering the executor,
+        // rather than completing a read-only transaction just to postpone it.
+        UNIT_ASSERT_VALUES_EQUAL(GetCumulativeCounter(runtime, tabletId,
+            "DataShard/TTxCdcStreamScanProgress/RoCompleted"), 0);
+
+        // Draining the queue must finish the scan even with its fallback timer
+        // held indefinitely. No extra queue capacity is provided by the wakeup.
+        blockEnqueue.Unblock().Stop();
+        WaitForContent(server, edgeActor, "/Root/Table/Stream", {
+            R"({"update":{"value":10},"key":[1]})",
+            R"({"update":{"value":20},"key":[2]})",
+            R"({"update":{"value":30},"key":[3]})",
+        });
+
+        // A stale timer after the early wakeup must not replay a scan batch.
+        runtime.SetObserverFunc(prevObserver);
+        for (auto& timer : timers) {
+            runtime.Send(timer.Release(), 0, true);
+        }
+        SimulateSleep(server, TDuration::Seconds(1));
+        UNIT_ASSERT_VALUES_EQUAL(GetCumulativeCounter(runtime, tabletId, "DataShard/ChangeRecordsEnqueued"), 3);
+    }
+
     Y_UNIT_TEST(InitialScanAndLimits) {
         TPortManager portManager;
         TServer::TPtr server = new TServer(TServerSettings(portManager.GetPort(2134), {}, DefaultPQConfig())

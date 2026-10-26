@@ -382,6 +382,7 @@ class TDataShard
             EvTableStatsError,
             EvRemoveSchemaSnapshots,
             EvBlockFailPointUnblock,
+            EvCdcStreamScanWakeup, // WARNING: tests use ES_PRIVATE + 34
             EvEnd
         };
 
@@ -573,6 +574,8 @@ class TDataShard
         };
 
         struct TEvCdcStreamScanContinue : public TEventLocal<TEvCdcStreamScanContinue, EvCdcStreamScanContinue> {};
+
+        struct TEvCdcStreamScanWakeup : public TEventLocal<TEvCdcStreamScanWakeup, EvCdcStreamScanWakeup> {};
 
         struct TEvRestartOperation : public TEventLocal<TEvRestartOperation, EvRestartOperation> {
             explicit TEvRestartOperation(ui64 txId)
@@ -1458,6 +1461,9 @@ class TDataShard
     void Handle(TEvDataShard::TEvCdcStreamScanRequest::TPtr& ev, const TActorContext& ctx);
     void Handle(TEvPrivate::TEvCdcStreamScanRegistered::TPtr& ev, const TActorContext& ctx);
     void Handle(TEvPrivate::TEvCdcStreamScanProgress::TPtr& ev, const TActorContext& ctx);
+    void Handle(TEvPrivate::TEvCdcStreamScanWakeup::TPtr& ev, const TActorContext& ctx);
+    void DeferCdcStreamScanProgress(TEvPrivate::TEvCdcStreamScanProgress::TPtr& ev, const TActorContext& ctx);
+    void WakeCdcStreamScans(const TActorContext& ctx, bool timeout = false);
     void Handle(TEvDataShard::TEvAsyncJobComplete::TPtr& ev, const TActorContext& ctx);
     void Handle(TEvPrivate::TEvRestartOperation::TPtr& ev, const TActorContext& ctx);
     void Handle(TEvPrivate::TEvBlockFailPointUnblock::TPtr& ev, const TActorContext& ctx);
@@ -3196,6 +3202,15 @@ private:
     THashMap<ui64, ui32> ChangeQueueReservations;
     ui64 NextChangeQueueReservationCookie = 1;
     ui32 ChangeQueueReservedCapacity = 0;
+    // Reservations whose scan batch has not been enqueued yet. Enqueued scan
+    // records still consume the scan budget, but already occupy queue slots.
+    ui32 ChangeQueuePendingCapacity = 0;
+    struct TWaitingCdcStreamScan {
+        TEvPrivate::TEvCdcStreamScanProgress::TPtr Request;
+        TMonotonic Since;
+    };
+    TVector<TWaitingCdcStreamScan> WaitingCdcStreamScans;
+    bool CdcStreamScanWakeupPending = false;
     TActorId OutChangeSender;
     bool OutChangeSenderSuspended = false;
     THolder<IChangeRecordSerializer> ChangeRecordDebugSerializer;
@@ -3532,6 +3547,7 @@ protected:
             HFunc(TEvDataShard::TEvCdcStreamScanRequest, Handle);
             HFunc(TEvPrivate::TEvCdcStreamScanRegistered, Handle);
             HFunc(TEvPrivate::TEvCdcStreamScanProgress, Handle);
+            HFunc(TEvPrivate::TEvCdcStreamScanWakeup, Handle);
             HFunc(TEvDataShard::TEvAsyncJobComplete, Handle);
             HFunc(TEvPrivate::TEvRestartOperation, Handle);
             HFunc(TEvPrivate::TEvBlockFailPointUnblock, Handle);

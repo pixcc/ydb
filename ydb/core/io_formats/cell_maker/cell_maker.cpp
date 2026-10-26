@@ -229,9 +229,14 @@ namespace {
 
     private:
         static bool Conv(TCell& c, const T& t, TMemoryPool& pool, TConverter<T, U> conv) {
-            auto& u = *pool.Allocate<U>();
-            u = conv(t);
-            c = TCell(reinterpret_cast<const char*>(&u), sizeof(u));
+            if constexpr (TCell::CanInline(sizeof(U))) {
+                const U u = conv(t);
+                c = TCell(reinterpret_cast<const char*>(&u), sizeof(u));
+            } else {
+                auto& u = *pool.Allocate<U>();
+                u = conv(t);
+                c = TCell(reinterpret_cast<const char*>(&u), sizeof(u));
+            }
 
             return true;
         }

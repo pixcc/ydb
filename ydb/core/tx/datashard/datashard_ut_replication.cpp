@@ -17,6 +17,40 @@ using namespace Tests;
 
 Y_UNIT_TEST_SUITE(DataShardReplication) {
 
+    Y_UNIT_TEST(BatchOffsetsSurviveReboot) {
+        TPortManager pm;
+        TServerSettings settings(pm.GetPort(2134));
+        settings.SetDomainName("Root").SetUseRealThreads(false);
+        Tests::TServer::TPtr server = new TServer(settings);
+        auto& runtime = *server->GetRuntime();
+        const auto sender = runtime.AllocateEdgeActor();
+        InitRoot(server, sender);
+        CreateShardedTable(server, sender, "/Root", "table", TShardedTableOptions()
+            .Replicated(true)
+            .ReplicationConsistencyLevel(EConsistencyLevel::Row));
+        const auto shard = GetTableShards(server, sender, "/Root/table").at(0);
+        const auto tableId = ResolveTableId(server, sender, "/Root/table");
+
+        ApplyChanges(server, shard, tableId, "source", {
+            TChange{ .Offset = 10, .Key = 1, .Value = 11 },
+            TChange{ .Offset = 11, .Key = 2, .Value = 22 },
+            TChange{ .Offset = 10, .Key = 1, .Value = 99 },
+            TChange{ .Offset = 12, .Key = 3, .Value = 33 },
+        });
+        RebootTablet(runtime, shard, sender);
+        ApplyChanges(server, shard, tableId, "source", {
+            TChange{ .Offset = 11, .Key = 2, .Value = 99 },
+            TChange{ .Offset = 12, .Key = 3, .Value = 99 },
+            TChange{ .Offset = 13, .Key = 4, .Value = 44 },
+        });
+        RebootTablet(runtime, shard, sender);
+        UNIT_ASSERT_VALUES_EQUAL(ReadShardedTable(server, "/Root/table"),
+            "key = 1, value = 11\n"
+            "key = 2, value = 22\n"
+            "key = 3, value = 33\n"
+            "key = 4, value = 44\n");
+    }
+
     Y_UNIT_TEST(SimpleApplyChanges) {
         TPortManager pm;
         TServerSettings serverSettings(pm.GetPort(2134));

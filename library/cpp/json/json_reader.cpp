@@ -599,12 +599,12 @@ namespace NJson {
         return ReadJson(in, &config, cbs);
     }
 
-    bool ReadJson(IInputStream* in, const TJsonReaderConfig* config, TJsonCallbacks* cbs) {
+    template <typename TStream>
+    static bool ReadJsonCallbacks(TStream& is, const TJsonReaderConfig& config, TJsonCallbacks* cbs) {
         TJsonCallbacksWrapper wrapper(*cbs);
-        TInputStreamWrapper is(*in);
 
         rapidjson::Reader reader;
-        auto result = Read(*config, reader, is, wrapper);
+        auto result = Read(config, reader, is, wrapper);
 
         if (result.IsError()) {
             cbs->OnError(result.Offset(), PrintError(result));
@@ -613,6 +613,16 @@ namespace NJson {
         }
 
         return cbs->OnEnd();
+    }
+
+    bool ReadJson(IInputStream* in, const TJsonReaderConfig* config, TJsonCallbacks* cbs) {
+        TInputStreamWrapper is(*in);
+        return ReadJsonCallbacks(is, *config, cbs);
+    }
+
+    bool ReadJson(TStringBuf in, const TJsonReaderConfig* config, TJsonCallbacks* cbs) {
+        TStringBufStreamWrapper is(in);
+        return ReadJsonCallbacks(is, *config, cbs);
     }
 
     TJsonValue ReadJsonTree(IInputStream* in, bool throwOnError) {

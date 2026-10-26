@@ -2,6 +2,8 @@
 
 #include <ydb/core/protos/base.pb.h>
 #include <ydb/core/protos/replication.pb.h>
+#include <ydb/core/protos/tx_datashard.pb.h>
+#include <cstring>
 
 #include <library/cpp/testing/unittest/registar.h>
 #include <ydb/library/aclib/user_context.h>
@@ -41,6 +43,109 @@ auto MakeIndexSchemaChangeRecord(TStringBuf indexes = {}) {
 } // namespace
 
 Y_UNIT_TEST_SUITE(JsonChangeRecord) {
+    Y_UNIT_TEST(SerializedUtf8OutlivesJsonAndPool) {
+        auto schema = MakeIntrusive<TLightweightSchema>();
+        schema->KeyColumns.emplace_back(NScheme::NTypeIds::Utf8);
+        schema->ValueColumns.emplace("value", TLightweightSchema::TColumn{2, NScheme::TTypeInfo(NScheme::NTypeIds::Utf8)});
+
+        struct TCase {
+            TStringBuf Json;
+            TStringBuf Expected;
+            bool IsNull = false;
+        };
+        const TCase cases[] = {
+            {R"("")", ""},
+            {R"("short")", "short"},
+            {R"("Длинная строка UTF-8 🌍")", "Длинная строка UTF-8 🌍"},
+            {R"("before\u0000after")", TStringBuf("before\0after", 12)},
+            {"null", {}, true},
+        };
+
+        for (const auto& test : cases) {
+            for (bool cacheKey : {false, true}) {
+                for (const TStringBuf operation : {TStringBuf("update"), TStringBuf("reset")}) {
+                    auto record = TChangeRecordBuilder()
+                        .WithBody(TStringBuilder() << R"({"key":["long UTF-8 key: Привет 🌍"],")"
+                            << operation << R"(":{"value":)" << test.Json << "}}")
+                        .WithSchema(schema)
+                        .Build();
+                    TMemoryPool pool(256);
+                    if (cacheKey) {
+                        record->GetKey(pool);
+                    }
+                    NKikimrTxDataShard::TEvApplyReplicationChanges::TChange serialized;
+                    record->Serialize(serialized, pool);
+                    UNIT_ASSERT_VALUES_EQUAL(pool.MemoryAllocated(), 0);
+                    record.Reset();
+                    pool.Clear();
+                    memset(pool.Allocate(4096), 0xff, 4096);
+
+                    const TSerializedCellVec key(serialized.GetKey());
+                    UNIT_ASSERT_VALUES_EQUAL(key.GetCells()[0].AsBuf(), "long UTF-8 key: Привет 🌍");
+                    const auto& updates = operation == "update" ? serialized.GetUpsert() : serialized.GetReset();
+                    UNIT_ASSERT_VALUES_EQUAL(updates.GetTags(0), 2);
+                    const TSerializedCellVec values(updates.GetData());
+                    UNIT_ASSERT_VALUES_EQUAL(values.GetCells()[0].IsNull(), test.IsNull);
+                    if (!test.IsNull) {
+                        UNIT_ASSERT_VALUES_EQUAL(values.GetCells()[0].AsBuf(), test.Expected);
+                    }
+                }
+            }
+        }
+    }
+
+    Y_UNIT_TEST(RebuildingRecordInvalidatesKey) {
+        auto utf8Schema = MakeIntrusive<TLightweightSchema>();
+        utf8Schema->KeyColumns.emplace_back(NScheme::NTypeIds::Utf8);
+        auto record = TChangeRecordBuilder()
+            .WithBody(R"({"key":["MTIz"],"erase":{}})")
+            .WithSchema(utf8Schema)
+            .Build();
+        UNIT_ASSERT_VALUES_EQUAL(record->GetKey()[0].AsBuf(), "MTIz");
+
+        auto stringSchema = MakeIntrusive<TLightweightSchema>();
+        stringSchema->KeyColumns.emplace_back(NScheme::NTypeIds::String);
+        record = TChangeRecordBuilder(record).WithSchema(stringSchema).Build();
+        UNIT_ASSERT_VALUES_EQUAL(record->GetKey()[0].AsBuf(), "123");
+
+        record = TChangeRecordBuilder(record)
+            .WithBody(R"({"key":["NDU2"],"erase":{}})")
+            .Build();
+        TMemoryPool pool(256);
+        NKikimrTxDataShard::TEvApplyReplicationChanges::TChange serialized;
+        record->Serialize(serialized, pool);
+        const TSerializedCellVec key(serialized.GetKey());
+        UNIT_ASSERT_VALUES_EQUAL(key.GetCells()[0].AsBuf(), "456");
+        UNIT_ASSERT_VALUES_EQUAL(record->GetKey()[0].AsBuf(), "456");
+    }
+    Y_UNIT_TEST(SerializeCachedCompositeKey) {
+        auto schema = MakeIntrusive<TLightweightSchema>();
+        schema->KeyColumns = {
+            NScheme::TTypeInfo(NScheme::NTypeIds::Uint64),
+            NScheme::TTypeInfo(NScheme::NTypeIds::Utf8),
+            NScheme::TTypeInfo(NScheme::TDecimalType(22, 9)),
+        };
+        schema->ValueColumns.emplace("value", TLightweightSchema::TColumn{4, NScheme::TTypeInfo(NScheme::NTypeIds::Utf8)});
+        auto record = TChangeRecordBuilder()
+            .WithOrder(42)
+            .WithBody(R"({"key":[18446744073709551615,"long UTF-8 key: Привет 🌍","123.45"],"update":{"value":"payload"}})")
+            .WithSchema(schema)
+            .Build();
+        TMemoryPool pool(256);
+        NKikimrTxDataShard::TEvApplyReplicationChanges::TChange before, after;
+        record->Serialize(before, pool);
+        const auto key = record->GetKey(pool);
+        UNIT_ASSERT_VALUES_EQUAL(key[0].AsValue<ui64>(), Max<ui64>());
+        UNIT_ASSERT_VALUES_EQUAL(key[1].AsBuf(), "long UTF-8 key: Привет 🌍");
+        UNIT_ASSERT_VALUES_EQUAL(key[2].Size(), 16);
+        pool.Clear();
+        memset(pool.Allocate(4096), 0xff, 4096);
+        record->Serialize(after, pool);
+        UNIT_ASSERT_VALUES_EQUAL(before.SerializeAsString(), after.SerializeAsString());
+        pool.Clear();
+        UNIT_ASSERT_VALUES_EQUAL(record->GetKey()[1].AsBuf(), "long UTF-8 key: Привет 🌍");
+    }
+
     Y_UNIT_TEST(DataChange) {
         auto record = TChangeRecordBuilder()
             .WithBody(R"({"key":[1], "update":{"value":100500}})")

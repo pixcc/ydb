@@ -290,6 +290,10 @@ public:
 
         NIceDb::TNiceDb db(txc.DB);
         bool pageFault = false;
+        // Reserve the batch in one Sys update instead of logging the next
+        // change-record order for every row. Skipped rows may leave gaps,
+        // just as a retried scan transaction already can.
+        ui64 order = ev.Rows ? Self->AllocateChangeRecordOrder(db, ev.Rows.size()) : 0;
 
         for (const auto& [k, v] : ev.Rows) {
             const auto key = NStreamScan::MakeKey(k.GetCells(), table->KeyColumnTypes);
@@ -337,7 +341,7 @@ public:
             }
 
             auto recordPtr = TChangeRecordBuilder(TChangeRecord::EKind::CdcDataChange)
-                .WithOrder(Self->AllocateChangeRecordOrder(db))
+                .WithOrder(order++)
                 .WithGroup(0)
                 .WithStep(readVersion.Step)
                 .WithTxId(readVersion.TxId)
@@ -392,13 +396,15 @@ public:
 
             Self->EnqueueChangeRecords(std::move(ChangeRecords), Request->Get()->ReservationCookie);
             ctx.Send(Request->Sender, Response.Release());
+            // A batch may produce fewer records than its reservation, including
+            // zero records. That also releases capacity for other scans.
+            Self->WakeCdcStreamScans(ctx);
         } else if (Reschedule) {
             YDB_LOG_INFO_CTX(ctx, "[CdcStreamScan] CDC stream scan progress rescheduled",
                 {"tabletId", TabletID()},
                 {"streamPathId", Request->Get()->StreamPathId});
 
-            // re-schedule tx
-            ctx.TActivationContext::Schedule(TDuration::Seconds(1), Request->Forward(ctx.SelfID));
+            Self->DeferCdcStreamScanProgress(Request, ctx);
         }
     }
 
@@ -748,7 +754,71 @@ void TDataShard::Handle(TEvPrivate::TEvCdcStreamScanRegistered::TPtr& ev, const 
 }
 
 void TDataShard::Handle(TEvPrivate::TEvCdcStreamScanProgress::TPtr& ev, const TActorContext& ctx) {
+    auto& request = *ev->Get();
+    const auto table = GetUserTables().find(request.TablePathId.LocalPathId);
+    // Unknown tables/streams still go through the transaction's cancellation
+    // path. For a live scan, avoid starting a transaction that can only wait.
+    if (table != GetUserTables().end() && table->second->CdcStreams.contains(request.StreamPathId)
+            && (GetFreeChangeQueueCapacity(request.ReservationCookie) < request.Rows.size()
+                || CheckChangesQueueOverflow(request.ReservationCookie))) {
+        // Keep the same pending reservation as the transaction would acquire,
+        // so waiting scans retain their share of the queue budget.
+        if (!request.ReservationCookie) {
+            request.ReservationCookie = ReserveChangeQueueCapacity(request.Rows.size());
+        }
+        YDB_LOG_INFO_CTX(ctx, "[CdcStreamScan] Deferring scan before transaction: insufficient change queue capacity",
+            {"tabletId", TabletID()},
+            {"streamPathId", request.StreamPathId},
+            {"rowCount", request.Rows.size()});
+        DeferCdcStreamScanProgress(ev, ctx);
+        return;
+    }
+    // Capacity and stream state may change while this transaction is queued.
+    // Its existing checks and reservation handling remain authoritative.
     Execute(new TTxCdcStreamScanProgress(this, ev), ctx);
+}
+
+void TDataShard::DeferCdcStreamScanProgress(TEvPrivate::TEvCdcStreamScanProgress::TPtr& ev, const TActorContext& ctx) {
+    WaitingCdcStreamScans.push_back({std::move(ev), ctx.Monotonic()});
+    if (!CdcStreamScanWakeupPending) {
+        CdcStreamScanWakeupPending = true;
+        // Keep a fallback for dropped streams and configuration changes that
+        // don't remove records. The timer never owns a second copy of a batch.
+        ctx.Schedule(TDuration::Seconds(1), new TEvPrivate::TEvCdcStreamScanWakeup());
+    }
+    // Capacity may have been released between Execute and Complete.
+    WakeCdcStreamScans(ctx);
+}
+
+void TDataShard::WakeCdcStreamScans(const TActorContext& ctx, bool timeout) {
+    auto out = WaitingCdcStreamScans.begin();
+    for (auto it = WaitingCdcStreamScans.begin(); it != WaitingCdcStreamScans.end(); ++it) {
+        const auto& request = *it->Request->Get();
+        if (timeout || (GetFreeChangeQueueCapacity(request.ReservationCookie) >= request.Rows.size()
+                && !CheckChangesQueueOverflow(request.ReservationCookie))) {
+            YDB_LOG_INFO_CTX(ctx, "[CdcStreamScan] Waking scan waiting for change queue capacity",
+                {"tabletId", TabletID()},
+                {"streamPathId", request.StreamPathId},
+                {"timeout", timeout},
+                {"waitUs", (ctx.Monotonic() - it->Since).MicroSeconds()},
+                {"queueSize", ChangesQueue.size()},
+                {"reserved", ChangeQueueReservedCapacity},
+                {"rowCount", request.Rows.size()});
+            // The transaction checks the limits again before accepting rows.
+            ctx.Send(it->Request->Forward(ctx.SelfID));
+        } else {
+            if (out != it) {
+                *out = std::move(*it);
+            }
+            ++out;
+        }
+    }
+    WaitingCdcStreamScans.erase(out, WaitingCdcStreamScans.end());
+}
+
+void TDataShard::Handle(TEvPrivate::TEvCdcStreamScanWakeup::TPtr&, const TActorContext& ctx) {
+    CdcStreamScanWakeupPending = false;
+    WakeCdcStreamScans(ctx, true);
 }
 
 }

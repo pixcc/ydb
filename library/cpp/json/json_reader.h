@@ -62,6 +62,8 @@ namespace NJson {
     bool ReadJson(IInputStream* in, bool allowComments, bool allowEscapedApostrophe, TJsonCallbacks* callbacks);
     bool ReadJson(IInputStream* in, const TJsonReaderConfig* config, TJsonCallbacks* callbacks);
 
+    bool ReadJson(TStringBuf in, const TJsonReaderConfig* config, TJsonCallbacks* callbacks);
+
     enum ReaderConfigFlags {
         NANINF = 0b10000,
         ITERATIVE = 0b1000,

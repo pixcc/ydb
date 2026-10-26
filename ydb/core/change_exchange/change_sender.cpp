@@ -106,6 +106,18 @@ void TChangeSender::EnqueueRecords(TVector<TEvChangeExchange::TEvEnqueueRecords:
     RequestRecords();
 }
 
+void TChangeSender::EnqueueResidentRecords(TVector<IChangeRecord::TPtr>&& records) {
+    LimitBatchSize = true;
+    for (auto& record : records) {
+        if (!record->IsBroadcast()) {
+            MemUsage += record->GetBodySize();
+        }
+        const auto order = record->GetOrder();
+        Y_ABORT_UNLESS(PendingSent.emplace(order, std::move(record)).second);
+    }
+    SendRecords();
+}
+
 bool TChangeSender::RequestRecords() {
     if (!Enqueued) {
         return false;
@@ -296,15 +308,20 @@ void TChangeSender::SendPreparedRecords(ui64 partitionId) {
     // they ACK immediately and must not introduce an extra OnReady round-trip.
     TVector<IChangeRecord::TPtr> toSend;
     TVector<IChangeRecord::TPtr> rest;
-    bool seenSchemaChangeBarrier = false;
+    bool holdBack = false;
+    ui64 batchBytes = 0;
     for (auto& record : sender.Prepared) {
-        if (seenSchemaChangeBarrier) {
+        if (LimitBatchSize && !toSend.empty() && batchBytes + record->GetBodySize() > MemLimit) {
+            holdBack = true;
+        }
+        if (holdBack) {
             rest.push_back(std::move(record));
             continue;
         }
         if (record->GetKind() == IChangeRecord::EKind::CdcSchemaChange) {
-            seenSchemaChangeBarrier = true;
+            holdBack = true;
         }
+        batchBytes += record->GetBodySize();
         toSend.push_back(std::move(record));
     }
     sender.Prepared = std::move(rest);

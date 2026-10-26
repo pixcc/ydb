@@ -371,6 +371,8 @@ public:
         }
 
         Self->CheckStateChange(ctx);
+        // Resume scans only after the removal transaction has committed.
+        Self->WakeCdcStreamScans(ctx);
     }
 
 private:

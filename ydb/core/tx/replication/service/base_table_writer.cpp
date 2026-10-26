@@ -492,6 +492,14 @@ class TLocalTableWriter
         return new TTablePartitionWriter(SelfId(), partitionId, tableId, Serializer->Clone());
     }
 
+    void EnqueueRecords(TVector<NChangeExchange::TEvChangeExchange::TEvEnqueueRecords::TRecordInfo>&& records) {
+        TVector<NChangeExchange::IChangeRecord::TPtr> residentRecords(Reserve(records.size()));
+        for (const auto& record : records) {
+            residentRecords.push_back(PendingRecords.at(record.Order));
+        }
+        EnqueueResidentRecords(std::move(residentRecords));
+    }
+
     void Handle(TEvWorker::TEvData::TPtr& ev) {
         YDB_LOG_DEBUG("Handle",
             {"ev", ev->Get()->ToString()});

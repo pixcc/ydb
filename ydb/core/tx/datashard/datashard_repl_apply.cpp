@@ -15,6 +15,41 @@ namespace NDataShard {
 
 using namespace NTabletFlatExecutor;
 
+namespace {
+
+// Offset checks still happen for every row. Only persistence is deferred: all
+// rows and their final offsets are committed in the same tablet transaction.
+class TReplicationOffsetsBatch : public TReplicationSourceOffsetsDb {
+public:
+    TReplicationOffsetsBatch(TTransactionContext& txc, const TReplicationSourceState& source)
+        : TReplicationSourceOffsetsDb(txc)
+        , Source(source)
+    {}
+
+    void PersistSplitKeyOffset(const TPathId& pathId, ui64 sourceId, ui64 splitKeyId, i64 offset) override {
+        Y_DEBUG_ABORT_UNLESS(pathId == Source.PathId && sourceId == Source.Id);
+        Offsets[splitKeyId] = offset;
+    }
+
+    void PersistSplitKeyDelete(const TPathId& pathId, ui64 sourceId, ui64 splitKeyId) override {
+        Offsets.erase(splitKeyId);
+        TReplicationSourceOffsetsDb::PersistSplitKeyDelete(pathId, sourceId, splitKeyId);
+    }
+
+    void Flush() {
+        for (const auto& [splitKeyId, offset] : Offsets) {
+            TReplicationSourceOffsetsDb::PersistSplitKeyOffset(Source.PathId, Source.Id, splitKeyId, offset);
+        }
+        Offsets.clear();
+    }
+
+private:
+    const TReplicationSourceState& Source;
+    TMap<ui64, i64> Offsets;
+};
+
+} // namespace
+
 class TDataShard::TTxApplyReplicationChanges : public TTransactionBase<TDataShard> {
 public:
     explicit TTxApplyReplicationChanges(TDataShard* self, TPipeline& pipeline,
@@ -146,9 +181,10 @@ public:
             }
         }
 
+        TReplicationOffsetsBatch offsetBatch(txc, source);
         try {
             for (const auto& change : msg.GetChanges()) {
-                if (!ApplyChange(txc, fullTableId, userTable, source, change, userDb, collector.Get())) {
+                if (!ApplyChange(txc, fullTableId, userTable, source, change, userDb, collector.Get(), offsetBatch)) {
                     Y_ENSURE(Result);
                     break;
                 }
@@ -165,6 +201,8 @@ public:
                 TStringBuilder() << "Size of key in secondary index is more than " << NLimits::MaxWriteKeySize);
             return true;
         }
+
+        offsetBatch.Flush();
 
         if (collector) {
             Changes = std::move(collector->GetCollected());
@@ -193,7 +231,8 @@ public:
     bool ApplyChange(
             TTransactionContext& txc, const TTableId& tableId, const TUserTable& userTable,
             TReplicationSourceState& source, const NKikimrTxDataShard::TEvApplyReplicationChanges::TChange& change,
-            TDataShardUserDb& userDb, IDataShardChangeCollector* collector)
+            TDataShardUserDb& userDb, IDataShardChangeCollector* collector,
+            IReplicationSourceOffsetsDb& offsetsDb)
     {
         Y_ENSURE(userTable.IsReplicated() || Self->IsIncrementalRestore());
 
@@ -225,8 +264,7 @@ public:
             return false;
         }
 
-        TReplicationSourceOffsetsDb rdb(txc);
-        if (!source.AdvanceMaxOffset(rdb, keyCellVec.GetCells(), sourceOffset)) {
+        if (!source.AdvanceMaxOffset(offsetsDb, keyCellVec.GetCells(), sourceOffset)) {
             // We have already seen this offset and ignore it
             return true;
         }

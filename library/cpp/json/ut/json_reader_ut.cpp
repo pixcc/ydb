@@ -6,6 +6,71 @@
 
 using namespace NJson;
 
+Y_UNIT_TEST_SUITE(TJsonMemoryCallbacksTest) {
+    Y_UNIT_TEST(MatchesStreamReader) {
+        const TVector<TString> inputs = {
+            R"({"key":[1],"update":{"value":"Привет 🌍"},"ts":[10,20]})",
+            R"([null,true,false,-9223372036854775808,18446744073709551615,1.25,"\uD83C\uDF0D"])",
+            R"({"duplicate":1,"duplicate":2})",
+            R"(/*comment*/ {"value":"escaped\'apostrophe"})",
+            "[", "{\"value\":\"\xc0\xaf\"}", "{\"value\":\"\xf0\x9f\"}",
+            "{\"value\":\"\\uD800\"}", "[1] trailing", "",
+            TString("\"") + TString(4095, 'x') + "Привет\"",
+            TString("\"") + TString(8192, 'x'),
+        };
+        for (bool iterative : {false, true}) {
+            for (bool permissive : {false, true}) {
+                TJsonReaderConfig config;
+                config.UseIterativeParser = iterative;
+                config.AllowComments = permissive;
+                config.AllowEscapedApostrophe = permissive;
+                for (const auto& input : inputs) {
+                    TJsonValue fromMemory, fromStream;
+                    TParserCallbacks memoryCallbacks(fromMemory), streamCallbacks(fromStream);
+                    TMemoryInput stream(input);
+                    const bool expected = ReadJson(&stream, &config, &streamCallbacks);
+                    UNIT_ASSERT_VALUES_EQUAL(ReadJson(TStringBuf(input), &config, &memoryCallbacks), expected);
+                    if (expected) {
+                        UNIT_ASSERT_VALUES_EQUAL(fromMemory, fromStream);
+                    }
+                }
+            }
+        }
+    }
+
+    Y_UNIT_TEST(CallbackFailureAndErrorOffset) {
+        struct TCallbacks : TJsonCallbacks {
+            size_t Offset = 0;
+            TString Error;
+            bool EndCalled = false;
+
+            bool OnString(const TStringBuf&) override {
+                return false;
+            }
+
+            void OnError(size_t offset, TStringBuf error) override {
+                Offset = offset;
+                Error = error;
+            }
+
+            bool OnEnd() override {
+                EndCalled = true;
+                return true;
+            }
+        };
+        for (const TStringBuf input : {"[\"reject\"]", "[true,]", "{\"a\":\"\xff\"}"}) {
+            TCallbacks memoryCallbacks, streamCallbacks;
+            TMemoryInput stream(input);
+            const TJsonReaderConfig config;
+            UNIT_ASSERT(!ReadJson(&stream, &streamCallbacks));
+            UNIT_ASSERT(!ReadJson(input, &config, &memoryCallbacks));
+            UNIT_ASSERT_VALUES_EQUAL(memoryCallbacks.Offset, streamCallbacks.Offset);
+            UNIT_ASSERT_VALUES_EQUAL(memoryCallbacks.Error, streamCallbacks.Error);
+            UNIT_ASSERT(!memoryCallbacks.EndCalled);
+        }
+    }
+}
+
 class TReformatCallbacks: public TJsonCallbacks {
     TJsonWriter& Writer;
 

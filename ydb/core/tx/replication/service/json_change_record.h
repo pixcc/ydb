@@ -69,11 +69,13 @@ public:
     template <typename T>
     TSelf& WithBody(T&& body) {
         auto* record = GetRecord();
+        record->Key.Clear();
         record->JsonParsed = ParseJsonBody(body, record->JsonBody, record->JsonError);
         return static_cast<TBase*>(this)->WithBody(std::forward<T>(body));
     }
 
     TSelf& WithSchema(TLightweightSchema::TCPtr schema) {
+        GetRecord()->Key.Clear();
         GetRecord()->Schema = schema;
         return static_cast<TSelf&>(*this);
     }

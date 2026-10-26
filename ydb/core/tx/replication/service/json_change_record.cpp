@@ -70,9 +70,9 @@ private:
 } // namespace
 
 bool TChangeRecordBuilder::ParseJsonBody(TStringBuf body, NJson::TJsonValue& json, TString& error) {
-    TMemoryInput input(body.data(), body.size());
     TSchemaKeyParser parser(json);
-    if (NJson::ReadJson(&input, &parser)) {
+    const NJson::TJsonReaderConfig config;
+    if (NJson::ReadJson(body, &config, &parser)) {
         return true;
     }
 
@@ -151,6 +151,20 @@ NChangeExchange::IChangeRecord::EKind TChangeRecord::GetKind() const {
     return EKind::CdcDataChange;
 }
 
+static bool MakeCellFromJson(TCell& cell, const NJson::TJsonValue& value,
+        const NScheme::TTypeInfo& type, TMemoryPool& pool, TString& error)
+{
+    if (type.GetTypeId() == NScheme::NTypeIds::Utf8 && value.IsString()) {
+        // These cells are copied into an owned key or serialized before JsonBody
+        // can be destroyed, so they may borrow its UTF-8 string storage.
+        const auto& text = value.GetString();
+        cell = TCell(text.data(), text.size());
+        return true;
+    }
+
+    return NFormats::MakeCell(cell, value, type, pool, error);
+}
+
 static bool ParseKey(TVector<TCell>& cells,
         const NJson::TJsonValue::TArray& key, TLightweightSchema::TCPtr schema, TMemoryPool& pool, TString& error)
 {
@@ -158,7 +172,7 @@ static bool ParseKey(TVector<TCell>& cells,
 
     Y_ABORT_UNLESS(key.size() == schema->KeyColumns.size());
     for (ui32 i = 0; i < key.size(); ++i) {
-        if (!NFormats::MakeCell(cells[i], key[i], schema->KeyColumns[i], pool, error)) {
+        if (!MakeCellFromJson(cells[i], key[i], schema->KeyColumns[i], pool, error)) {
             return false;
         }
     }
@@ -197,7 +211,7 @@ static bool ParseValue(TVector<NTable::TTag>& tags, TVector<TCell>& cells,
         Y_ABORT_UNLESS(it != schema->ValueColumns.end());
 
         tags.push_back(it->second.Tag);
-        if (!NFormats::MakeCell(cells.emplace_back(), value, it->second.Type, pool, error)) {
+        if (!MakeCellFromJson(cells.emplace_back(), value, it->second.Type, pool, error)) {
             return false;
         }
     }
@@ -229,7 +243,9 @@ void TChangeRecord::Serialize(NKikimrTxDataShard::TEvApplyReplicationChanges_TCh
 
     TString error;
 
-    if (JsonBody.Has("key") && JsonBody["key"].IsArray()) {
+    if (Key) {
+        record.SetKey(TSerializedCellVec::Serialize(*Key));
+    } else if (JsonBody.Has("key") && JsonBody["key"].IsArray()) {
         auto res = TransformKey(record, JsonBody["key"].GetArray(), Schema, pool, error);
         Y_ABORT_UNLESS(res, "Cannot transform key: %s", error.c_str());
     } else {

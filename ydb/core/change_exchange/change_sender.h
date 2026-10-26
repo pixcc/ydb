@@ -156,6 +156,9 @@ protected:
     void KillSenders();
 
     void EnqueueRecords(TVector<TEvChangeExchange::TEvEnqueueRecords::TRecordInfo>&& records);
+    // The owner already retains these bodies until acknowledgement or retry.
+    // Route the complete batch before splitting it into bounded write requests.
+    void EnqueueResidentRecords(TVector<IChangeRecord::TPtr>&& records);
     void ProcessRecords(TVector<IChangeRecord::TPtr>&& records);
     void ForgetRecords(TVector<ui64>&& records);
     void RemoveRecords();
@@ -201,6 +204,7 @@ protected:
 private:
     const ui64 MemLimit;
     ui64 MemUsage;
+    bool LimitBatchSize = false;
 
     THashMap<ui64, TSender> Senders; // ui64 is partition id
     ui64 ReadySenders = 0;
